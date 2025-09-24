@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.0.9
+Version: 0.1.0
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.0.9"
+__version__ = "0.1.0"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
@@ -285,6 +285,8 @@ def show_update_dialog(update_info):
     try:
         from tkinter import messagebox
         
+        download_url = update_info.get('download_url', '')
+        
         message = f"""🆕 새 버전이 있습니다!
 
 현재 버전: v{CURRENT_VERSION}
@@ -293,8 +295,12 @@ def show_update_dialog(update_info):
 업데이트 내용:
 {update_info['release_notes'][:200]}...
 
-지금 업데이트하시겠습니까?
-(프로그램이 재시작됩니다)"""
+⚠️ 임시 방법: 수동 다운로드
+GitHub에서 직접 다운로드하세요:
+{download_url}
+
+자동 업데이트를 시도하시겠습니까?
+(실패 시 위 링크에서 수동 다운로드)"""
         
         return messagebox.askyesno("업데이트 알림", message)
     except:
@@ -318,6 +324,18 @@ def download_and_install_update(download_url, version):
             with urllib.request.urlopen(download_url) as response:
                 with open(new_exe_path, 'wb') as f:
                     shutil.copyfileobj(response, f)
+            
+            # 다운로드 확인
+            if os.path.exists(new_exe_path):
+                file_size = os.path.getsize(new_exe_path)
+                print(f"✅ 다운로드 완료: {new_exe_path}")
+                print(f"📊 파일 크기: {file_size:,} bytes ({file_size/1024/1024:.1f} MB)")
+                
+                # 파일이 너무 작으면 오류
+                if file_size < 50 * 1024 * 1024:  # 50MB 미만이면 문제
+                    raise Exception(f"다운로드된 파일이 너무 작습니다: {file_size:,} bytes")
+            else:
+                raise Exception("다운로드된 파일을 찾을 수 없습니다")
             
             # EXE 교체 스크립트 생성
             updater_script = create_exe_update_script(new_exe_path)
