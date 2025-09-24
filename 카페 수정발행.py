@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.1.5
+Version: 0.1.7
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.1.5"
+__version__ = "0.1.7"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
@@ -467,7 +467,7 @@ def create_exe_update_script(new_exe_path):
     batch_content = f'''@echo off
 chcp 65001 > nul
 echo 🔄 업데이트 적용 중...
-timeout /t 3 /nobreak > nul
+timeout /t 5 /nobreak > nul
 echo 📂 현재 EXE: {current_exe}
 echo 📥 새 EXE: {new_exe_path}
 echo 💾 기존 파일 백업 중...
@@ -475,6 +475,15 @@ echo 💾 기존 파일 백업 중...
 set "CURRENT_EXE={current_exe}"
 set "NEW_EXE={new_exe_path}"
 set "BACKUP_EXE=%CURRENT_EXE%.backup"
+
+REM 프로세스 종료 대기 추가
+for %%F in ("{current_exe}") do set "EXE_NAME=%%~nxF"
+:WAIT_LOOP
+tasklist /FI "IMAGENAME eq %EXE_NAME%" 2>NUL | find /I /N "%EXE_NAME%">NUL
+if "%ERRORLEVEL%"=="0" (
+    timeout /t 1 /nobreak > nul
+    goto WAIT_LOOP
+)
 
 if exist "%BACKUP_EXE%" del /f /q "%BACKUP_EXE%"
 if exist "%CURRENT_EXE%" (
