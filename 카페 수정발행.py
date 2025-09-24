@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.0.2
+Version: 0.0.3
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
@@ -132,6 +132,11 @@ def check_license():
     try:
         print(f"📖 라이선스 파일 읽는 중...")
         with open(license_file, 'r', encoding='utf-8') as f:
+            file_content = f.read()
+            print(f"📄 파일 내용 (첫 100자): {file_content[:100]}")
+            
+        # JSON 파싱 시도
+        with open(license_file, 'r', encoding='utf-8') as f:
             license_data = json.load(f)
         
         print(f"📋 라이선스 파일 내용:")
@@ -166,6 +171,10 @@ def check_license():
         print(f"✅ 라이선스 인증 성공: {license_data.get('user_name', '사용자')}")
         return True
         
+    except json.JSONDecodeError as e:
+        print(f"❌ 라이선스 파일 JSON 형식 오류: {str(e)}")
+        show_license_error_dialog(f"라이선스 파일이 손상되었습니다.\n새 라이선스 파일을 받아주세요.\n\n오류: {str(e)}")
+        return False
     except Exception as e:
         print(f"❌ 라이선스 파일 처리 오류: {str(e)}")
         show_license_error_dialog(f"라이선스 파일 오류: {str(e)}")
@@ -215,14 +224,24 @@ def check_for_updates():
             if response.status == 200:
                 import json
                 data = json.loads(response.read().decode())
+                print(f"📋 GitHub API 응답: {data.get('tag_name', 'Unknown')}")
                 latest_version = data['tag_name'].replace('v', '')  # v1.0.0 -> 1.0.0
                 download_url = None
                 
-                # assets에서 .zip 파일 찾기
+                # assets에서 다운로드 파일 찾기 (.zip 또는 .exe)
+                print(f"🔍 릴리스 assets 확인: {len(data.get('assets', []))}개")
                 for asset in data.get('assets', []):
-                    if asset['name'].endswith('.zip'):
+                    print(f"  📄 파일: {asset['name']}")
+                    # 모든 .exe 파일을 다운로드 대상으로 인식 (더 유연하게)
+                    if asset['name'].endswith('.exe'):
                         download_url = asset['browser_download_url']
+                        print(f"  ✅ 다운로드 URL 발견: {download_url}")
                         break
+                    # 백업: .zip 파일
+                    elif asset['name'].endswith('.zip'):
+                        download_url = asset['browser_download_url']
+                        print(f"  ⚠️ 백업 다운로드 URL: {download_url}")
+                        # break 하지 않고 계속 찾기 (exe 파일 우선)
                 
                 if compare_versions(CURRENT_VERSION, latest_version) < 0:
                     print(f"🆕 새 버전 발견: v{latest_version} (현재: v{CURRENT_VERSION})")
