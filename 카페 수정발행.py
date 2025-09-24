@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.1.0
+Version: 0.1.1
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
@@ -362,13 +362,18 @@ def download_and_install_update(download_url, version):
         print("🔄 업데이트 적용 중...")
         print("프로그램이 재시작됩니다...")
         
-        # 업데이트 스크립트 실행 후 현재 프로그램 종료
+        # 배치 파일 실행 (성공한 버전 방식)
         import subprocess
-        # 콘솔창에서 실행하여 진행 상황 확인 가능
-        subprocess.Popen([sys.executable, updater_script], 
-                        creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
-        
-        print("🔄 업데이트 스크립트 실행됨 - 콘솔창에서 진행 상황 확인 가능")
+        if updater_script.endswith('.bat'):
+            # 배치 파일 실행 (콘솔창에서 확인 가능)
+            subprocess.Popen(['cmd', '/c', updater_script], 
+                           creationflags=subprocess.CREATE_NEW_CONSOLE)
+            print("🔄 배치 파일 업데이트 실행됨 - 콘솔창에서 진행 상황 확인 가능")
+        else:
+            # Python 스크립트 실행 (기존 방식)
+            subprocess.Popen([sys.executable, updater_script], 
+                            creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+            print("🔄 업데이트 스크립트 실행됨 - 콘솔창에서 진행 상황 확인 가능")
         
         # 현재 프로그램 종료
         sys.exit(0)
@@ -453,87 +458,38 @@ if __name__ == "__main__":
     return script_path
 
 def create_exe_update_script(new_exe_path):
-    """EXE 파일 직접 교체 스크립트 생성"""
+    """배치 파일 방식 EXE 교체 스크립트 생성 (성공한 버전 방식)"""
     current_exe = sys.executable if getattr(sys, 'frozen', False) else __file__
-    current_dir = os.path.dirname(os.path.abspath(current_exe))
-    script_path = os.path.join(tempfile.gettempdir(), "exe_updater.py")
+    batch_path = os.path.join(tempfile.gettempdir(), "update.bat")
     
-    script_content = f'''
-import os
-import shutil
-import time
-import subprocess
-import sys
-
-def main():
-    print("🔄 EXE 업데이트 적용 중...")
-    time.sleep(5)  # 메인 프로그램 완전 종료 대기 (3초 → 5초)
-    
-    new_exe_path = r"{new_exe_path}"
-    current_exe = r"{current_exe}"
-    
-    print(f"📂 현재 EXE: {{current_exe}}")
-    print(f"📥 새 EXE: {{new_exe_path}}")
-    
-    try:
-        # 현재 실행 중인 프로세스 확인 및 종료 대기
-        import psutil
-        current_name = os.path.basename(current_exe)
-        
-        # 같은 이름의 실행 중인 프로세스 종료 대기
-        max_wait = 10  # 최대 10초 대기
-        for i in range(max_wait):
-            running_processes = [p for p in psutil.process_iter(['name']) 
-                               if p.info['name'] and current_name.lower() in p.info['name'].lower()]
-            if not running_processes:
-                break
-            print(f"⏳ 프로세스 종료 대기 중... ({{i+1}}/{{max_wait}})")
-            time.sleep(1)
-        
-        # 기존 파일 백업
-        backup_exe = current_exe + ".backup"
-        if os.path.exists(current_exe):
-            if os.path.exists(backup_exe):
-                os.remove(backup_exe)  # 기존 백업 삭제
-            shutil.move(current_exe, backup_exe)  # move로 변경 (copy2 대신)
-            print(f"💾 기존 파일 백업: {{backup_exe}}")
-        
-        # 새 파일로 교체
-        shutil.copy2(new_exe_path, current_exe)
-        print("✅ 업데이트 완료!")
-        
-        # 파일 교체 확인
-        if os.path.exists(current_exe):
-            file_size = os.path.getsize(current_exe)
-            print(f"📊 새 파일 크기: {{file_size}} bytes")
-        
-        # 업데이트된 프로그램 재시작 (2초 대기 후)
-        time.sleep(2)
-        subprocess.Popen([current_exe], cwd=os.path.dirname(current_exe))
-        print("🚀 프로그램 재시작됨")
-        
-    except Exception as e:
-        print(f"❌ 업데이트 실패: {{e}}")
-        # 실패 시 백업 파일로 복구
-        backup_exe = current_exe + ".backup"
-        if os.path.exists(backup_exe):
-            try:
-                if os.path.exists(current_exe):
-                    os.remove(current_exe)
-                shutil.move(backup_exe, current_exe)
-                print("🔄 백업 파일로 복구됨")
-            except Exception as restore_error:
-                print(f"❌ 복구 실패: {{restore_error}}")
-        input("Press Enter to exit...")
-
-if __name__ == "__main__":
-    main()
+    # 성공한 버전의 배치 파일 방식 적용
+    batch_content = f'''@echo off
+echo 🔄 업데이트 적용 중...
+timeout /t 3 /nobreak > nul
+echo 📂 현재 EXE: {current_exe}
+echo 📥 새 EXE: {new_exe_path}
+echo 💾 기존 파일 백업 중...
+if exist "{current_exe}.backup" del "{current_exe}.backup"
+if exist "{current_exe}" move "{current_exe}" "{current_exe}.backup"
+echo 🔄 새 파일로 교체 중...
+move /y "{new_exe_path}" "{current_exe}"
+if %errorlevel% neq 0 (
+    echo ❌ 파일 교체 실패
+    if exist "{current_exe}.backup" move "{current_exe}.backup" "{current_exe}"
+    pause
+    exit /b 1
+)
+echo ✅ 업데이트 완료!
+echo 🚀 프로그램 재시작 중...
+start "" "{current_exe}"
+echo 🗑️ 업데이트 파일 정리 중...
+del "%~f0"
 '''
     
-    with open(script_path, 'w', encoding='utf-8') as f:
-        f.write(script_content)
+    with open(batch_path, 'w', encoding='utf-8') as f:
+        f.write(batch_content)
     
-    return script_path
+    return batch_path
 
 def get_version_info():
     """버전 정보 반환"""
