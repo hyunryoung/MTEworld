@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.0.7
+Version: 0.0.8
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.0.7"
+__version__ = "0.0.8"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
@@ -346,8 +346,11 @@ def download_and_install_update(download_url, version):
         
         # 업데이트 스크립트 실행 후 현재 프로그램 종료
         import subprocess
+        # 콘솔창에서 실행하여 진행 상황 확인 가능
         subprocess.Popen([sys.executable, updater_script], 
                         creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+        
+        print("🔄 업데이트 스크립트 실행됨 - 콘솔창에서 진행 상황 확인 가능")
         
         # 현재 프로그램 종료
         sys.exit(0)
