@@ -1,0 +1,90 @@
+# 🚫 개인정보 및 민감한 파일들
+*.xlsx
+*.xls
+accounts.xlsx
+accounts.xls
+
+# 🔐 라이선스 및 인증 파일들
+*.key
+license*.key
+license_history.json
+
+# 🛡️ 관리자 전용 도구들 (푸시 제외)
+license_manager.py
+license_manager_modern.py
+
+# 📝 로그 파일들
+*.log
+*.txt
+cafe_posting_log_*.txt
+backup_*.txt
+
+# 📊 결과 파일들
+*.csv
+*결과*.csv
+*_계정상태로그.csv
+
+# 📁 작업 폴더들 (카페별 폴더)
+원고/
+*/원고/
+카페*/
+*카페*/
+
+# 🔧 설정 파일들
+app_config.json
+work_progress.json
+
+# 🗂️ 임시 파일들
+temp/
+tmp/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 🏗️ 빌드 관련
+build/
+dist/
+*.spec
+backup_*/
+
+# 🖼️ 이미지 파일들 (개인 이미지 포함 가능)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.ico
+
+# 📦 압축 파일들
+*.zip
+*.rar
+*.7z
+
+# 🔒 프록시 파일들
+proxy*.txt
+*proxy*.txt
+
+# 💾 기타 개인 데이터
+*.db
+*.sqlite
+*.sqlite3
+
+# 🖥️ OS 관련
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 📋 IDE 관련
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 🎯 특정 개인정보 파일들
+*개인정보*
+*계정*
+*아이디*
+*비밀번호*
+*password*
+*account*
