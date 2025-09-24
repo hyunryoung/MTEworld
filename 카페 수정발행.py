@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.1.9
+Version: 0.2.0
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.1.9"
+__version__ = "0.2.0"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
