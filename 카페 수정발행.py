@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.1.4
+Version: 0.1.5
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
@@ -459,7 +459,7 @@ if __name__ == "__main__":
 
 def create_exe_update_script(new_exe_path):
     """배치 파일 방식 EXE 교체 스크립트 생성 (성공한 버전 방식)"""
-    current_exe = sys.executable if getattr(sys, 'frozen', False) else __file__
+    current_exe = sys.executable
     batch_path = os.path.join(tempfile.gettempdir(), "update.bat")
     
     # 한글 경로 처리를 위한 개선된 배치 파일
@@ -522,7 +522,7 @@ def check_and_handle_updates():
     """업데이트 확인 및 처리 (백그라운드)"""
     try:
         # 2초 대기 (메인 UI 로딩 완료 후)
-        time.sleep(2)
+        # time.sleep(2)
         
         update_info = check_for_updates()
         
@@ -10117,7 +10117,7 @@ def main():
     # 🔄 업데이트 확인 (백그라운드에서)
     try:
         print("🔄 업데이트 확인 중... (백그라운드)")
-        threading.Thread(target=check_and_handle_updates, daemon=True).start()
+        check_and_handle_updates()
     except Exception as e:
         print(f"⚠️ 업데이트 확인 실패: {e}")
     
