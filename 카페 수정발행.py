@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.1.2
+Version: 0.1.3
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.1.2"
+__version__ = "0.1.3"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
@@ -462,28 +462,47 @@ def create_exe_update_script(new_exe_path):
     current_exe = sys.executable if getattr(sys, 'frozen', False) else __file__
     batch_path = os.path.join(tempfile.gettempdir(), "update.bat")
     
-    # 성공한 버전의 배치 파일 방식 적용
+    # 한글 경로 처리를 위한 개선된 배치 파일
+    # 경로를 8.3 형식으로 변환하거나 robocopy 사용
     batch_content = f'''@echo off
+chcp 65001 > nul
 echo 🔄 업데이트 적용 중...
 timeout /t 3 /nobreak > nul
 echo 📂 현재 EXE: {current_exe}
 echo 📥 새 EXE: {new_exe_path}
 echo 💾 기존 파일 백업 중...
-if exist "{current_exe}.backup" del "{current_exe}.backup"
-if exist "{current_exe}" move "{current_exe}" "{current_exe}.backup"
+
+set "CURRENT_EXE={current_exe}"
+set "NEW_EXE={new_exe_path}"
+set "BACKUP_EXE=%CURRENT_EXE%.backup"
+
+if exist "%BACKUP_EXE%" del /f /q "%BACKUP_EXE%"
+if exist "%CURRENT_EXE%" (
+    copy /y "%CURRENT_EXE%" "%BACKUP_EXE%" > nul
+    if %errorlevel% neq 0 (
+        echo ❌ 백업 실패
+        pause
+        exit /b 1
+    )
+    del /f /q "%CURRENT_EXE%"
+)
+
 echo 🔄 새 파일로 교체 중...
-move /y "{new_exe_path}" "{current_exe}"
+copy /y "%NEW_EXE%" "%CURRENT_EXE%" > nul
 if %errorlevel% neq 0 (
     echo ❌ 파일 교체 실패
-    if exist "{current_exe}.backup" move "{current_exe}.backup" "{current_exe}"
+    if exist "%BACKUP_EXE%" copy /y "%BACKUP_EXE%" "%CURRENT_EXE%" > nul
     pause
     exit /b 1
 )
+
 echo ✅ 업데이트 완료!
 echo 🚀 프로그램 재시작 중...
-start "" "{current_exe}"
+start "" "%CURRENT_EXE%"
 echo 🗑️ 업데이트 파일 정리 중...
-del "%~f0"
+del /f /q "%NEW_EXE%" > nul 2>&1
+timeout /t 1 /nobreak > nul
+del /f /q "%~f0" > nul 2>&1
 '''
     
     with open(batch_path, 'w', encoding='utf-8') as f:
