@@ -308,22 +308,38 @@ def download_and_install_update(download_url, version):
         
         # 임시 폴더에 다운로드
         temp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(temp_dir, f"update_v{version}.zip")
         
-        # 다운로드
-        with urllib.request.urlopen(download_url) as response:
-            with open(zip_path, 'wb') as f:
-                shutil.copyfileobj(response, f)
-        
-        print("📦 업데이트 파일 압축 해제 중...")
-        
-        # 압축 해제
-        extract_dir = os.path.join(temp_dir, "update")
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(extract_dir)
-        
-        # 업데이트 스크립트 생성
-        updater_script = create_update_script(extract_dir)
+        # 파일 확장자에 따라 처리 방식 결정
+        if download_url.endswith('.exe'):
+            # EXE 파일 직접 다운로드
+            new_exe_path = os.path.join(temp_dir, "new_version.exe")
+            
+            print("📥 새 실행 파일 다운로드 중...")
+            with urllib.request.urlopen(download_url) as response:
+                with open(new_exe_path, 'wb') as f:
+                    shutil.copyfileobj(response, f)
+            
+            # EXE 교체 스크립트 생성
+            updater_script = create_exe_update_script(new_exe_path)
+            
+        else:
+            # ZIP 파일 처리 (기존 방식)
+            zip_path = os.path.join(temp_dir, f"update_v{version}.zip")
+            
+            # 다운로드
+            with urllib.request.urlopen(download_url) as response:
+                with open(zip_path, 'wb') as f:
+                    shutil.copyfileobj(response, f)
+            
+            print("📦 업데이트 파일 압축 해제 중...")
+            
+            # 압축 해제
+            extract_dir = os.path.join(temp_dir, "update")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            
+            # 업데이트 스크립트 생성
+            updater_script = create_update_script(extract_dir)
         
         print("🔄 업데이트 적용 중...")
         print("프로그램이 재시작됩니다...")
@@ -404,6 +420,61 @@ def main():
         
     except Exception as e:
         print(f"❌ 업데이트 실패: {{e}}")
+        input("Press Enter to exit...")
+
+if __name__ == "__main__":
+    main()
+'''
+    
+    with open(script_path, 'w', encoding='utf-8') as f:
+        f.write(script_content)
+    
+    return script_path
+
+def create_exe_update_script(new_exe_path):
+    """EXE 파일 직접 교체 스크립트 생성"""
+    current_exe = sys.executable if getattr(sys, 'frozen', False) else __file__
+    current_dir = os.path.dirname(os.path.abspath(current_exe))
+    script_path = os.path.join(tempfile.gettempdir(), "exe_updater.py")
+    
+    script_content = f'''
+import os
+import shutil
+import time
+import subprocess
+import sys
+
+def main():
+    print("🔄 EXE 업데이트 적용 중...")
+    time.sleep(3)  # 메인 프로그램 종료 대기
+    
+    new_exe_path = r"{new_exe_path}"
+    current_exe = r"{current_exe}"
+    
+    try:
+        # 기존 파일 백업
+        backup_exe = current_exe + ".backup"
+        if os.path.exists(current_exe):
+            shutil.copy2(current_exe, backup_exe)
+            print(f"💾 기존 파일 백업: {{backup_exe}}")
+        
+        # 새 파일로 교체
+        shutil.copy2(new_exe_path, current_exe)
+        print("✅ 업데이트 완료!")
+        
+        # 업데이트된 프로그램 재시작
+        subprocess.Popen([current_exe])
+        print("🚀 프로그램 재시작됨")
+        
+    except Exception as e:
+        print(f"❌ 업데이트 실패: {{e}}")
+        # 실패 시 백업 파일로 복구
+        if os.path.exists(backup_exe):
+            try:
+                shutil.copy2(backup_exe, current_exe)
+                print("🔄 백업 파일로 복구됨")
+            except:
+                pass
         input("Press Enter to exit...")
 
 if __name__ == "__main__":
