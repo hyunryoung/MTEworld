@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.0.5
+Version: 0.0.6
 Author: License Manager
 Last Updated: 2025-09-25
 """
 
 # 🔢 버전 정보
-__version__ = "0.0.5"
+__version__ = "0.0.6"
 __build_date__ = "2025-09-25"
 __author__ = "License Manager"
 
@@ -446,35 +446,63 @@ import sys
 
 def main():
     print("🔄 EXE 업데이트 적용 중...")
-    time.sleep(3)  # 메인 프로그램 종료 대기
+    time.sleep(5)  # 메인 프로그램 완전 종료 대기 (3초 → 5초)
     
     new_exe_path = r"{new_exe_path}"
     current_exe = r"{current_exe}"
     
+    print(f"📂 현재 EXE: {{current_exe}}")
+    print(f"📥 새 EXE: {{new_exe_path}}")
+    
     try:
+        # 현재 실행 중인 프로세스 확인 및 종료 대기
+        import psutil
+        current_name = os.path.basename(current_exe)
+        
+        # 같은 이름의 실행 중인 프로세스 종료 대기
+        max_wait = 10  # 최대 10초 대기
+        for i in range(max_wait):
+            running_processes = [p for p in psutil.process_iter(['name']) 
+                               if p.info['name'] and current_name.lower() in p.info['name'].lower()]
+            if not running_processes:
+                break
+            print(f"⏳ 프로세스 종료 대기 중... ({{i+1}}/{{max_wait}})")
+            time.sleep(1)
+        
         # 기존 파일 백업
         backup_exe = current_exe + ".backup"
         if os.path.exists(current_exe):
-            shutil.copy2(current_exe, backup_exe)
+            if os.path.exists(backup_exe):
+                os.remove(backup_exe)  # 기존 백업 삭제
+            shutil.move(current_exe, backup_exe)  # move로 변경 (copy2 대신)
             print(f"💾 기존 파일 백업: {{backup_exe}}")
         
         # 새 파일로 교체
         shutil.copy2(new_exe_path, current_exe)
         print("✅ 업데이트 완료!")
         
-        # 업데이트된 프로그램 재시작
-        subprocess.Popen([current_exe])
+        # 파일 교체 확인
+        if os.path.exists(current_exe):
+            file_size = os.path.getsize(current_exe)
+            print(f"📊 새 파일 크기: {{file_size}} bytes")
+        
+        # 업데이트된 프로그램 재시작 (2초 대기 후)
+        time.sleep(2)
+        subprocess.Popen([current_exe], cwd=os.path.dirname(current_exe))
         print("🚀 프로그램 재시작됨")
         
     except Exception as e:
         print(f"❌ 업데이트 실패: {{e}}")
         # 실패 시 백업 파일로 복구
+        backup_exe = current_exe + ".backup"
         if os.path.exists(backup_exe):
             try:
-                shutil.copy2(backup_exe, current_exe)
+                if os.path.exists(current_exe):
+                    os.remove(current_exe)
+                shutil.move(backup_exe, current_exe)
                 print("🔄 백업 파일로 복구됨")
-            except:
-                pass
+            except Exception as restore_error:
+                print(f"❌ 복구 실패: {{restore_error}}")
         input("Press Enter to exit...")
 
 if __name__ == "__main__":
