@@ -214,98 +214,168 @@ def show_license_error_dialog(error_msg):
         print(f"❌ 라이선스 오류: {error_msg}")
 
 # 🔄 === 자동 업데이트 시스템 ===
-def check_for_updates():
-    """GitHub에서 새 버전 확인"""
-    try:
-        print("🔄 업데이트 확인 중...")
+# PySide6 import (전역으로 이동)
+try:
+    from PySide6.QtWidgets import QMessageBox
+    from PySide6.QtCore import QObject, Signal
+    import logging
+    import tempfile
+    import json
+    import requests
+except ImportError:
+    # PyQt5 fallback
+    from PyQt5.QtWidgets import QMessageBox
+    from PyQt5.QtCore import QObject, pyqtSignal as Signal
+    import logging
+    import tempfile
+    import json
+    import requests
+
+class Updater(QObject):
+    update_available = Signal(str)  # 새 버전 정보를 전달하는 시그널
+    update_progress = Signal(int)   # 업데이트 진행률을 전달하는 시그널
+    update_completed = Signal()     # 업데이트 완료를 알리는 시그널
+    update_error = Signal(str)      # 업데이트 오류를 전달하는 시그널
+
+    def __init__(self, current_version, github_repo):
+        super().__init__()
+        self.current_version = current_version
+        self.github_repo = github_repo
+        self.logger = logging.getLogger(__name__)
         
-        # GitHub API에서 최신 릴리스 정보 가져오기
-        with urllib.request.urlopen(UPDATE_CHECK_URL, timeout=10) as response:
-            if response.status == 200:
-                import json
-                data = json.loads(response.read().decode())
-                print(f"📋 GitHub API 응답: {data.get('tag_name', 'Unknown')}")
-                latest_version = data['tag_name'].replace('v', '')  # v1.0.0 -> 1.0.0
-                download_url = None
-                
-                # assets에서 다운로드 파일 찾기 (.zip 또는 .exe)
-                print(f"🔍 릴리스 assets 확인: {len(data.get('assets', []))}개")
-                for asset in data.get('assets', []):
-                    print(f"  📄 파일: {asset['name']}")
-                    # 모든 .exe 파일을 다운로드 대상으로 인식 (더 유연하게)
-                    if asset['name'].endswith('.exe'):
-                        download_url = asset['browser_download_url']
-                        print(f"  ✅ 다운로드 URL 발견: {download_url}")
-                        break
-                    # 백업: .zip 파일
-                    elif asset['name'].endswith('.zip'):
-                        download_url = asset['browser_download_url']
-                        print(f"  ⚠️ 백업 다운로드 URL: {download_url}")
-                        # break 하지 않고 계속 찾기 (exe 파일 우선)
-                
-                if compare_versions(CURRENT_VERSION, latest_version) < 0:
-                    print(f"🆕 새 버전 발견: v{latest_version} (현재: v{CURRENT_VERSION})")
-                    return {
-                        'available': True,
-                        'version': latest_version,
-                        'download_url': download_url,
-                        'release_notes': data.get('body', '업데이트 내용이 없습니다.')
-                    }
+    def check_for_updates(self):
+        """GitHub에서 최신 버전 확인"""
+        try:
+            # GitHub API를 통해 최신 릴리즈 정보 가져오기
+            api_url = f"https://api.github.com/repos/{self.github_repo}/releases/latest"
+            response = requests.get(api_url)
+            response.raise_for_status()
+            
+            release_info = response.json()
+            latest_version = release_info['tag_name']
+            
+            # 버전 비교 (v 접두사 제거)
+            latest_ver = latest_version.lstrip('v')
+            current_ver = self.current_version.lstrip('v')
+            
+            print(f"버전 비교: 현재 v{current_ver}, 최신 v{latest_ver}")
+            
+            if latest_ver != current_ver:
+                print(f"새로운 버전 발견: v{current_ver} → v{latest_ver}")
+                # 업데이트 다이얼로그 즉시 표시
+                self._show_update_dialog(release_info)
+                return True, release_info
+            
+            return False, None
+            
+        except Exception as e:
+            print(f"업데이트 확인 중 오류 발생: {e}")
+            self.update_error.emit(str(e))
+            return False, None
+
+    def download_update(self, release_info):
+        """업데이트 파일 다운로드"""
+        try:
+            # exe 파일 찾기
+            exe_asset = None
+            for asset in release_info['assets']:
+                if asset['name'].endswith('.exe'):
+                    exe_asset = asset
+                    break
+            
+            if not exe_asset:
+                raise Exception("업데이트 파일을 찾을 수 없습니다.")
+            
+            # 임시 디렉토리에 다운로드
+            temp_dir = tempfile.gettempdir()
+            temp_file = os.path.join(temp_dir, exe_asset['name'])
+            
+            response = requests.get(exe_asset['browser_download_url'], stream=True)
+            total_size = int(response.headers.get('content-length', 0))
+            
+            with open(temp_file, 'wb') as f:
+                if total_size == 0:
+                    f.write(response.content)
                 else:
-                    print(f"✅ 최신 버전입니다: v{CURRENT_VERSION}")
-                    return {'available': False}
-            else:
-                print(f"⚠️ 업데이트 확인 실패: HTTP {response.status}")
-                return {'available': False, 'error': f'HTTP {response.status}'}
+                    downloaded = 0
+                    for data in response.iter_content(chunk_size=4096):
+                        downloaded += len(data)
+                        f.write(data)
+                        progress = int((downloaded / total_size) * 100)
+                        self.update_progress.emit(progress)
+            
+            return temp_file
+            
+        except Exception as e:
+            print(f"업데이트 다운로드 중 오류 발생: {e}")
+            self.update_error.emit(str(e))
+            return None
+
+    def install_update(self, update_file):
+        """업데이트 설치"""
+        try:
+            # 현재 실행 파일의 경로
+            current_exe = sys.executable
+            
+            # 업데이트 배치 스크립트 생성
+            batch_file = os.path.join(tempfile.gettempdir(), 'update.bat')
+            with open(batch_file, 'w') as f:
+                f.write('@echo off\n')
+                f.write('timeout /t 2 /nobreak > nul\n')  # 현재 프로세스가 종료되기를 기다림
+                f.write(f'move /y "{update_file}" "{current_exe}"\n')
+                f.write(f'start "" "{current_exe}"\n')
+                f.write('del "%~f0"\n')  # 배치 파일 자체 삭제
+            
+            # 배치 파일 실행
+            subprocess.Popen(['cmd', '/c', batch_file], 
+                           creationflags=subprocess.CREATE_NO_WINDOW,
+                           close_fds=True)
+            
+            self.update_completed.emit()
+            return True
+            
+        except Exception as e:
+            print(f"업데이트 설치 중 오류 발생: {e}")
+            self.update_error.emit(str(e))
+            return False
+
+    def _show_update_dialog(self, release_info):
+        """업데이트 다이얼로그 표시"""
+        reply = QMessageBox.question(
+            None,
+            "업데이트 확인",
+            f"새로운 버전이 있습니다!\n\n"
+            f"현재 버전: v{self.current_version}\n"
+            f"새 버전: v{release_info['tag_name']}\n\n"
+            f"지금 업데이트하시겠습니까?\n\n"
+            f"변경사항:\n{release_info['body']}",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # 업데이트 파일 다운로드
+            update_file = self.download_update(release_info)
+            if update_file:
+                # 업데이트 설치
+                reply2 = QMessageBox.question(
+                    None,
+                    "업데이트 준비 완료",
+                    "업데이트가 다운로드되었습니다.\n"
+                    "프로그램을 종료하고 업데이트를 설치하시겠습니까?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
                 
-    except Exception as e:
-        print(f"⚠️ 업데이트 확인 중 오류: {str(e)}")
-        return {'available': False, 'error': str(e)}
+                if reply2 == QMessageBox.Yes:
+                    self.install_update(update_file)
+                    sys.exit(0)  # 프로그램 종료
 
-def compare_versions(current, latest):
-    """버전 비교 (semantic versioning)"""
-    try:
-        def version_tuple(v):
-            return tuple(map(int, v.split('.')))
-        
-        current_tuple = version_tuple(current)
-        latest_tuple = version_tuple(latest)
-        
-        if current_tuple < latest_tuple:
-            return -1  # current < latest
-        elif current_tuple > latest_tuple:
-            return 1   # current > latest
-        else:
-            return 0   # current == latest
-    except:
-        return 0
+    def perform_update(self):
+        """업데이트 프로세스 실행 (수동 호출용)"""
+        success, release_info = self.check_for_updates()
+        if success:
+            self._show_update_dialog(release_info)
 
-def show_update_dialog(update_info):
-    """업데이트 다이얼로그 표시"""
-    try:
-        from tkinter import messagebox
-        
-        download_url = update_info.get('download_url', '')
-        
-        message = f"""🆕 새 버전이 있습니다!
-
-현재 버전: v{CURRENT_VERSION}
-최신 버전: v{update_info['version']}
-
-업데이트 내용:
-{update_info['release_notes'][:200]}...
-
-⚠️ 임시 방법: 수동 다운로드
-GitHub에서 직접 다운로드하세요:
-{download_url}
-
-자동 업데이트를 시도하시겠습니까?
-(실패 시 위 링크에서 수동 다운로드)"""
-        
-        return messagebox.askyesno("업데이트 알림", message)
-    except:
-        print(f"🆕 새 버전 v{update_info['version']} 사용 가능")
-        return False
+# 고유 식별자 생성 함수
 
 def download_and_install_update(download_url, version):
     """업데이트 다운로드 및 설치"""
@@ -527,30 +597,6 @@ def get_version_info():
         'author': __author__
     }
 
-def check_and_handle_updates():
-    """업데이트 확인 및 처리 (백그라운드)"""
-    try:
-        # 2초 대기 (메인 UI 로딩 완료 후)
-        # time.sleep(2)
-        
-        update_info = check_for_updates()
-        
-        if update_info.get('available'):
-            # 메인 스레드에서 다이얼로그 표시
-            if show_update_dialog(update_info):
-                if update_info.get('download_url'):
-                    download_and_install_update(update_info['download_url'], update_info['version'])
-                else:
-                    print("❌ 다운로드 URL을 찾을 수 없습니다.")
-                    try:
-                        from tkinter import messagebox
-                        messagebox.showwarning("업데이트 오류", "다운로드 링크를 찾을 수 없습니다.\nGitHub에서 수동으로 다운로드해주세요.")
-                    except:
-                        pass
-        
-    except Exception as e:
-        print(f"⚠️ 업데이트 처리 중 오류: {e}")
-
 # 고유 식별자 생성 함수
 def generate_unique_key(original_url, script_folder, thread_id):
     """작업별 고유 식별자 생성"""
@@ -666,6 +712,10 @@ try:
         QDialogButtonBox, QAbstractItemView, QMenu
     )
     from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer
+    import logging
+    import tempfile
+    import json
+    import requests
     from PySide6.QtGui import QFont, QIcon, QPalette, QColor, QTextCursor, QScreen
     
     from selenium import webdriver
@@ -5838,36 +5888,9 @@ class CafePostingMainWindow(QMainWindow):
     def manual_update_check(self):
         """수동 업데이트 확인"""
         self.log_message("🔄 수동 업데이트 확인 시작...")
-        
-        # 별도 스레드에서 업데이트 확인
-        def check_update():
-            try:
-                update_info = check_for_updates()
-                
-                if update_info.get('available'):
-                    self.log_message(f"🆕 새 버전 발견: v{update_info['version']}")
-                    
-                    # 메인 스레드에서 다이얼로그 표시
-                    QTimer.singleShot(100, lambda: self.handle_update_dialog(update_info))
-                else:
-                    self.log_message("✅ 이미 최신 버전입니다.")
-                    QTimer.singleShot(100, lambda: QMessageBox.information(
-                        self, "업데이트 확인", f"현재 v{CURRENT_VERSION}이 최신 버전입니다."))
-                    
-            except Exception as e:
-                self.log_message(f"❌ 업데이트 확인 실패: {e}")
-                QTimer.singleShot(100, lambda: QMessageBox.warning(
-                    self, "업데이트 오류", f"업데이트 확인에 실패했습니다:\n{str(e)}"))
-        
-        threading.Thread(target=check_update, daemon=True).start()
+        updater = Updater(__version__, "hyunryoung/MTEworld")
+        updater.check_for_updates()
     
-    def handle_update_dialog(self, update_info):
-        """업데이트 다이얼로그 처리"""
-        if show_update_dialog(update_info):
-            if update_info.get('download_url'):
-                download_and_install_update(update_info['download_url'], update_info['version'])
-            else:
-                QMessageBox.warning(self, "업데이트 오류", "다운로드 링크를 찾을 수 없습니다.\nGitHub에서 수동으로 다운로드해주세요.")
     
     def open_license_manager(self):
         """라이선스 관리자 실행"""
@@ -10125,8 +10148,9 @@ def main():
     
     # 🔄 업데이트 확인 (백그라운드에서)
     try:
-        print("🔄 업데이트 확인 중... (백그라운드)")
-        check_and_handle_updates()
+        print("🔄 업데이트 확인 중...")
+        updater = Updater(__version__, "hyunryoung/MTEworld")
+        updater.check_for_updates()
     except Exception as e:
         print(f"⚠️ 업데이트 확인 실패: {e}")
     
