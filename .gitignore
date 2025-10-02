@@ -75,6 +75,9 @@ proxy*.txt
 Thumbs.db
 desktop.ini
 
+# 🌐 브라우저 사용자 데이터
+AppData/
+
 # 📋 IDE 관련
 .vscode/
 .idea/
