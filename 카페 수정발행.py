@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.2.0
+Version: 0.2.1
 Author: MTEworld
 Last Updated: 2025-10-02
 """
 
 # 🔢 버전 정보
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 __build_date__ = "2025-10-02"
 __author__ = "MTEworld"
 
