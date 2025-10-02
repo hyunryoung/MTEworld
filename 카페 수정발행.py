@@ -8,14 +8,14 @@
 - 자동 업데이트 기능
 
 Version: 0.2.0
-Author: License Manager
-Last Updated: 2025-09-25
+Author: MTEworld
+Last Updated: 2025-10-02
 """
 
 # 🔢 버전 정보
 __version__ = "0.2.0"
-__build_date__ = "2025-09-25"
-__author__ = "License Manager"
+__build_date__ = "2025-10-02"
+__author__ = "MTEworld"
 
 # 🔄 업데이트 관련 설정
 GITHUB_REPO = "hyunryoung/MTEworld"  # GitHub 저장소 경로
@@ -56,6 +56,71 @@ import hashlib  # 🔐 라이선스 시스템용 추가
 import platform  # 🔐 라이선스 시스템용 추가
 import urllib.request  # 🔄 업데이트 체크용 추가
 import zipfile  # 🔄 업데이트 파일 압축 해제용
+import glob  # 🔄 임시 디렉토리 정리용
+
+# 📝 === 로그 시스템 설정 ===
+def setup_logging():
+    """날짜별 로그 파일 설정"""
+    try:
+        # 현재 날짜로 로그 파일명 생성
+        current_date = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_filename = f"cafe_posting_log_{current_date}.txt"
+        
+        # 로그 설정
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s] %(message)s',
+            handlers=[
+                logging.FileHandler(log_filename, encoding='utf-8'),
+                logging.StreamHandler(sys.stdout)  # 콘솔에도 출력
+            ]
+        )
+        
+        # 전역 로거 생성
+        global app_logger
+        app_logger = logging.getLogger('CafePosting')
+        
+        # 시작 로그
+        app_logger.info("=" * 80)
+        app_logger.info(f"🤖 네이버 카페 수정발행 자동화 프로그램 v{__version__} 시작")
+        app_logger.info(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        app_logger.info(f"📂 로그 파일: {log_filename}")
+        app_logger.info(f"💻 머신 ID: {get_machine_id()}")
+        app_logger.info("=" * 80)
+        
+        return log_filename
+        
+    except Exception as e:
+        print(f"❌ 로그 설정 실패: {e}")
+        return None
+
+# 로그 헬퍼 함수
+def log_info(message):
+    """정보 로그"""
+    try:
+        if 'app_logger' in globals():
+            app_logger.info(message)
+        print(message)
+    except:
+        print(message)
+
+def log_error(message):
+    """에러 로그"""
+    try:
+        if 'app_logger' in globals():
+            app_logger.error(message)
+        print(f"❌ {message}")
+    except:
+        print(f"❌ {message}")
+
+def log_warning(message):
+    """경고 로그"""
+    try:
+        if 'app_logger' in globals():
+            app_logger.warning(message)
+        print(f"⚠️ {message}")
+    except:
+        print(f"⚠️ {message}")
 
 # 🔐 === 라이선스 시스템 ===
 def get_machine_id():
@@ -215,21 +280,12 @@ def show_license_error_dialog(error_msg):
 
 # 🔄 === 자동 업데이트 시스템 ===
 # PySide6 import (전역으로 이동)
-try:
-    from PySide6.QtWidgets import QMessageBox
-    from PySide6.QtCore import QObject, Signal
-    import logging
-    import tempfile
-    import json
-    import requests
-except ImportError:
-    # PyQt5 fallback
-    from PyQt5.QtWidgets import QMessageBox
-    from PyQt5.QtCore import QObject, pyqtSignal as Signal
-    import logging
-    import tempfile
-    import json
-    import requests
+from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QObject, Signal
+import logging
+import tempfile
+import json
+import requests
 
 class Updater(QObject):
     update_available = Signal(str)  # 새 버전 정보를 전달하는 시그널
@@ -312,24 +368,30 @@ class Updater(QObject):
             return None
 
     def install_update(self, update_file):
-        """업데이트 설치"""
+        """개선된 업데이트 설치 (DLL 로딩 오류 방지)"""
         try:
             # 현재 실행 파일의 경로
             current_exe = sys.executable
             
-            # 업데이트 배치 스크립트 생성
-            batch_file = os.path.join(tempfile.gettempdir(), 'update.bat')
-            with open(batch_file, 'w') as f:
-                f.write('@echo off\n')
-                f.write('timeout /t 2 /nobreak > nul\n')  # 현재 프로세스가 종료되기를 기다림
-                f.write(f'move /y "{update_file}" "{current_exe}"\n')
-                f.write(f'start "" "{current_exe}"\n')
-                f.write('del "%~f0"\n')  # 배치 파일 자체 삭제
+            # 프로세스 정리를 위한 추가 대기
+            print("🔄 업데이트 설치 준비 중...")
+            time.sleep(1)
             
-            # 배치 파일 실행
+            # 임시 디렉토리 정리 (DLL 로딩 오류 방지)
+            temp_dirs = glob.glob(os.path.join(tempfile.gettempdir(), '_MEI*'))
+            for temp_dir in temp_dirs:
+                try:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    print(f"임시 디렉토리 정리: {temp_dir}")
+                except:
+                    pass
+            
+            # 개선된 업데이트 스크립트 사용
+            batch_file = self.create_safe_update_script(update_file, current_exe)
+            
+            # 배치 파일 실행 (콘솔 창 표시로 진행 상황 확인 가능)
             subprocess.Popen(['cmd', '/c', batch_file], 
-                           creationflags=subprocess.CREATE_NO_WINDOW,
-                           close_fds=True)
+                           creationflags=subprocess.CREATE_NEW_CONSOLE)
             
             self.update_completed.emit()
             return True
@@ -338,6 +400,80 @@ class Updater(QObject):
             print(f"업데이트 설치 중 오류 발생: {e}")
             self.update_error.emit(str(e))
             return False
+    
+    def create_safe_update_script(self, update_file, current_exe):
+        """안전한 업데이트 스크립트 생성"""
+        batch_file = os.path.join(tempfile.gettempdir(), 'safe_update.bat')
+        
+        batch_content = f'''@echo off
+chcp 65001 > nul
+title MTE WORLD 카페 수정발행 - 업데이트 설치
+echo.
+echo 🔄 MTE WORLD 카페 수정발행 업데이트 설치 중...
+echo.
+echo 📂 업데이트 파일: {update_file}
+echo 📂 대상 파일: {current_exe}
+echo.
+
+REM 프로세스 완전 종료 대기
+echo ⏳ 기존 프로세스 종료 대기 중...
+for %%F in ("{current_exe}") do set "EXE_NAME=%%~nxF"
+set /a "WAIT_COUNT=0"
+:WAIT_LOOP
+tasklist /FI "IMAGENAME eq %EXE_NAME%" 2>NUL | find /I /N "%EXE_NAME%">NUL
+if "%ERRORLEVEL%"=="0" (
+    set /a "WAIT_COUNT+=1"
+    if %WAIT_COUNT% gtr 20 (
+        echo ⚠️  프로세스가 완전히 종료되지 않았지만 계속 진행합니다...
+        goto CONTINUE_UPDATE
+    )
+    echo 대기 중... (%WAIT_COUNT%/20^)
+    timeout /t 2 /nobreak > nul
+    goto WAIT_LOOP
+)
+
+:CONTINUE_UPDATE
+echo ✅ 프로세스 종료 완료
+
+REM 임시 디렉토리 정리
+echo 🧹 임시 파일 정리 중...
+for /d %%d in ("%TEMP%\\_MEI*") do (
+    rd /s /q "%%d" 2>nul
+)
+
+REM 백업 생성
+echo 💾 기존 파일 백업 중...
+set "BACKUP_FILE={current_exe}.backup"
+if exist "%BACKUP_FILE%" del /f /q "%BACKUP_FILE%"
+if exist "{current_exe}" copy /y "{current_exe}" "%BACKUP_FILE%" > nul
+
+REM 파일 교체
+echo 🔄 새 파일로 교체 중...
+move /y "{update_file}" "{current_exe}" > nul
+if %errorlevel% neq 0 (
+    echo ❌ 파일 교체 실패 - 백업에서 복원 중...
+    if exist "%BACKUP_FILE%" copy /y "%BACKUP_FILE%" "{current_exe}" > nul
+    echo.
+    echo 업데이트에 실패했습니다. 백업 파일에서 복원되었습니다.
+    pause
+    exit /b 1
+)
+
+echo ✅ 업데이트 완료!
+echo.
+echo 🚀 프로그램 재시작 중...
+timeout /t 3 /nobreak > nul
+start "" "{current_exe}"
+
+echo 🗑️ 임시 파일 정리 중...
+timeout /t 2 /nobreak > nul
+del /f /q "%~f0" > nul 2>&1
+'''
+        
+        with open(batch_file, 'w', encoding='utf-8') as f:
+            f.write(batch_content)
+        
+        return batch_file
 
     def _show_update_dialog(self, release_info):
         """업데이트 다이얼로그 표시"""
@@ -528,34 +664,55 @@ if __name__ == "__main__":
     return script_path
 
 def create_exe_update_script(new_exe_path):
-    """배치 파일 방식 EXE 교체 스크립트 생성 (성공한 버전 방식)"""
+    """개선된 배치 파일 방식 EXE 교체 스크립트 생성 (DLL 로딩 오류 방지)"""
     current_exe = sys.executable
     batch_path = os.path.join(tempfile.gettempdir(), "update.bat")
     
-    # 한글 경로 처리를 위한 개선된 배치 파일
-    # 경로를 8.3 형식으로 변환하거나 robocopy 사용
+    # DLL 로딩 오류 방지를 위한 개선된 배치 파일
     batch_content = f'''@echo off
 chcp 65001 > nul
-echo 🔄 업데이트 적용 중...
+echo 🔄 MTE WORLD 카페 수정발행 업데이트 적용 중...
+echo.
 timeout /t 5 /nobreak > nul
 echo 📂 현재 EXE: {current_exe}
 echo 📥 새 EXE: {new_exe_path}
-echo 💾 기존 파일 백업 중...
+echo.
 
 set "CURRENT_EXE={current_exe}"
 set "NEW_EXE={new_exe_path}"
 set "BACKUP_EXE=%CURRENT_EXE%.backup"
+set "TEMP_EXE=%CURRENT_EXE%.temp"
 
-REM 프로세스 종료 대기 추가
+REM 프로세스 완전 종료 대기 (더 긴 시간)
+echo ⏳ 기존 프로세스 종료 대기 중...
 for %%F in ("{current_exe}") do set "EXE_NAME=%%~nxF"
+set /a "WAIT_COUNT=0"
 :WAIT_LOOP
 tasklist /FI "IMAGENAME eq %EXE_NAME%" 2>NUL | find /I /N "%EXE_NAME%">NUL
 if "%ERRORLEVEL%"=="0" (
-    timeout /t 1 /nobreak > nul
+    set /a "WAIT_COUNT+=1"
+    if %WAIT_COUNT% gtr 30 (
+        echo ⚠️  프로세스가 완전히 종료되지 않았지만 계속 진행합니다...
+        goto CONTINUE_UPDATE
+    )
+    echo 대기 중... (%WAIT_COUNT%/30^)
+    timeout /t 2 /nobreak > nul
     goto WAIT_LOOP
 )
 
-if exist "%BACKUP_EXE%" del /f /q "%BACKUP_EXE%"
+:CONTINUE_UPDATE
+echo ✅ 프로세스 종료 완료
+
+REM 임시 디렉토리 정리 (DLL 로딩 오류 방지)
+echo 🧹 임시 파일 정리 중...
+for /d %%d in ("%TEMP%\\_MEI*") do (
+    echo 정리 중: %%d
+    rd /s /q "%%d" 2>nul
+)
+
+REM 파일 백업
+echo 💾 기존 파일 백업 중...
+if exist "%BACKUP_EXE%" del /f /q "%BACKUP_EXE%" 2>nul
 if exist "%CURRENT_EXE%" (
     copy /y "%CURRENT_EXE%" "%BACKUP_EXE%" > nul
     if %errorlevel% neq 0 (
@@ -563,24 +720,48 @@ if exist "%CURRENT_EXE%" (
         pause
         exit /b 1
     )
-    del /f /q "%CURRENT_EXE%"
 )
 
+REM 안전한 파일 교체 (2단계 방식)
 echo 🔄 새 파일로 교체 중...
+REM 1단계: 기존 파일을 임시 이름으로 변경
+if exist "%CURRENT_EXE%" (
+    move "%CURRENT_EXE%" "%TEMP_EXE%" > nul
+    if %errorlevel% neq 0 (
+        echo ❌ 기존 파일 이동 실패
+        pause
+        exit /b 1
+    )
+)
+
+REM 2단계: 새 파일을 원래 이름으로 복사
 copy /y "%NEW_EXE%" "%CURRENT_EXE%" > nul
 if %errorlevel% neq 0 (
-    echo ❌ 파일 교체 실패
-    if exist "%BACKUP_EXE%" copy /y "%BACKUP_EXE%" "%CURRENT_EXE%" > nul
+    echo ❌ 파일 교체 실패 - 백업에서 복원 중...
+    if exist "%BACKUP_EXE%" (
+        copy /y "%BACKUP_EXE%" "%CURRENT_EXE%" > nul
+    ) else if exist "%TEMP_EXE%" (
+        move "%TEMP_EXE%" "%CURRENT_EXE%" > nul
+    )
     pause
     exit /b 1
 )
 
+REM 임시 파일 삭제
+if exist "%TEMP_EXE%" del /f /q "%TEMP_EXE%" > nul
+
 echo ✅ 업데이트 완료!
+echo.
 echo 🚀 프로그램 재시작 중...
-start "" "%CURRENT_EXE%"
+timeout /t 2 /nobreak > nul
+
+REM 새 프로그램 실행 (더 안전한 방식)
+cd /d "%~dp0"
+start "" /d "%~dp0" "%CURRENT_EXE%"
+
 echo 🗑️ 업데이트 파일 정리 중...
+timeout /t 2 /nobreak > nul
 del /f /q "%NEW_EXE%" > nul 2>&1
-timeout /t 1 /nobreak > nul
 del /f /q "%~f0" > nul 2>&1
 '''
     
@@ -1720,7 +1901,12 @@ class CafePostingWorker(QThread):
         return bool(re.match(valid_pattern, url))
     
     def emit_progress(self, message, thread_id=None):
-        """스레드별 로그 전송 헬퍼 함수"""
+        """스레드별 로그 전송 헬퍼 함수 (로그 파일 기록 포함)"""
+        # 로그 파일에도 기록 (메인 윈도우를 통해)
+        if self.main_window and hasattr(self.main_window, 'log_message'):
+            self.main_window.log_message(message, thread_id)
+        
+        # 기존 시그널 전송
         if thread_id is not None:
             self.signals.progress_with_thread.emit(message, thread_id)
         else:
@@ -5649,7 +5835,7 @@ class CafePostingMainWindow(QMainWindow):
         self.setMinimumSize(1200, 800)
         
         # 🔥 로그 파일 설정 (프로그램 시작 시 초기화)
-        self.setup_logging()
+        self.setup_window_logging()
         
         # 데이터 저장
         self.reply_accounts = []
@@ -5703,13 +5889,33 @@ class CafePostingMainWindow(QMainWindow):
     def setup_logging(self):
         """🔥 로그 파일 설정 - 프로그램 시작 시 로그 파일 초기화"""
         try:
-            # 로그 파일 경로 설정 (영문 파일명으로 변경)
+            # 로그 파일 경로 설정 (절대 경로로 확실하게)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            self.log_file_path = os.path.join(os.path.dirname(__file__), f"cafe_posting_log_{timestamp}.txt")
+            current_dir = os.getcwd()  # 현재 작업 디렉토리 사용
+            self.log_file_path = os.path.join(current_dir, f"cafe_posting_log_{timestamp}.txt")
+            
+            print(f"📝 로그 파일 생성 시도: {self.log_file_path}")
+            print(f"📂 현재 작업 디렉토리: {current_dir}")
+            
+            # 디렉토리 쓰기 권한 확인
+            try:
+                test_file = os.path.join(current_dir, f"test_write_{timestamp}.tmp")
+                with open(test_file, 'w', encoding='utf-8') as f:
+                    f.write("test")
+                os.remove(test_file)
+                print("✅ 디렉토리 쓰기 권한 확인됨")
+            except Exception as perm_error:
+                print(f"❌ 디렉토리 쓰기 권한 없음: {perm_error}")
+                # 임시 디렉토리로 대체
+                import tempfile
+                current_dir = tempfile.gettempdir()
+                self.log_file_path = os.path.join(current_dir, f"cafe_posting_log_{timestamp}.txt")
+                print(f"🔄 임시 디렉토리로 변경: {self.log_file_path}")
             
             # 기존 로그 파일이 있으면 삭제 (초기화)
             if os.path.exists(self.log_file_path):
                 os.remove(self.log_file_path)
+                print(f"🗑️ 기존 로그 파일 삭제됨")
             
             # 로거 설정
             self.logger = logging.getLogger('CafePosting')
@@ -5720,7 +5926,7 @@ class CafePostingMainWindow(QMainWindow):
                 self.logger.removeHandler(handler)
             
             # 파일 핸들러 설정
-            file_handler = logging.FileHandler(self.log_file_path, encoding='utf-8')
+            file_handler = logging.FileHandler(self.log_file_path, encoding='utf-8', mode='w')
             file_handler.setLevel(logging.INFO)
             
             # 로그 포맷 설정
@@ -5729,25 +5935,46 @@ class CafePostingMainWindow(QMainWindow):
             
             self.logger.addHandler(file_handler)
             
-            # 시작 로그 기록 및 로그 파일 생성 확인
+            # 시작 로그 기록 및 즉시 플러시
             self.logger.info("=" * 60)
             self.logger.info("🚀 네이버 카페 포스팅 프로그램 시작")
+            self.logger.info(f"📂 작업 디렉토리: {current_dir}")
+            self.logger.info(f"📝 로그 파일 경로: {self.log_file_path}")
             self.logger.info("=" * 60)
+            
+            # 강제 플러시로 즉시 파일에 기록
+            for handler in self.logger.handlers:
+                if hasattr(handler, 'flush'):
+                    handler.flush()
             
             # 로그 파일이 실제로 생성되었는지 확인
             if os.path.exists(self.log_file_path):
                 file_size = os.path.getsize(self.log_file_path)
                 self.logger.info(f"✅ 로그 파일 생성 확인: {self.log_file_path} (크기: {file_size} bytes)")
                 print(f"✅ 로그 파일 생성됨: {self.log_file_path}")
+                print(f"📊 로그 파일 크기: {file_size} bytes")
+                
+                # 추가 테스트 로그 기록
+                self.logger.info("🧪 로그 시스템 테스트 - 실시간 기록 확인")
+                
+                # 다시 플러시
+                for handler in self.logger.handlers:
+                    if hasattr(handler, 'flush'):
+                        handler.flush()
+                        
+                # 최종 크기 확인
+                final_size = os.path.getsize(self.log_file_path)
+                print(f"📊 최종 로그 파일 크기: {final_size} bytes")
+                
             else:
                 print(f"❌ 로그 파일 생성 실패: {self.log_file_path}")
                 # 콘솔 로그로 대체
                 print("⚠️ 파일 로그 실패 - 콘솔 로그로 진행합니다")
-            
-            print(f"📝 로그 파일 생성: {self.log_file_path}")
+                self.logger = None
             
         except Exception as e:
             print(f"❌ 로그 설정 실패: {e}")
+            print(f"🔍 오류 상세: {traceback.format_exc()}")
             self.logger = None
     
     def verify_log_file_health(self):
@@ -5755,13 +5982,27 @@ class CafePostingMainWindow(QMainWindow):
         try:
             if hasattr(self, 'log_file_path') and self.log_file_path and os.path.exists(self.log_file_path):
                 file_size = os.path.getsize(self.log_file_path)
-                # 로그 파일이 너무 작으면 경고
-                if file_size < 100:  # 100바이트 미만이면 문제 가능성
+                
+                # 로그 파일 상태 상세 확인
+                print(f"📊 로그 파일 상태 체크: {self.log_file_path}")
+                print(f"📊 현재 파일 크기: {file_size} bytes")
+                
+                # 기준을 더 관대하게 변경 (프로그램 시작 시에는 작을 수 있음)
+                if file_size < 50:  # 50바이트 미만이면 문제 (기존 100 → 50으로 완화)
                     print(f"⚠️ 로그 파일이 너무 작습니다: {file_size} bytes")
                     return False
-                return True
+                
+                # 파일 접근 권한 테스트
+                try:
+                    with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                        f.write("")  # 빈 문자열로 접근 테스트
+                    print(f"✅ 로그 파일 쓰기 권한 정상")
+                    return True
+                except Exception as access_error:
+                    print(f"❌ 로그 파일 접근 권한 오류: {access_error}")
+                    return False
             else:
-                print("❌ 로그 파일이 존재하지 않습니다")
+                print(f"❌ 로그 파일이 존재하지 않습니다: {getattr(self, 'log_file_path', 'None')}")
                 return False
         except Exception as e:
             print(f"⚠️ 로그 파일 상태 확인 실패: {e}")
@@ -6896,6 +7137,13 @@ class CafePostingMainWindow(QMainWindow):
             self.log_message(f"📋 {cafe_name} 엑셀 행 정보: 총 {len(account_rows)}행")
             self.log_message(f"📝 사용 가능한 원고: 총 {total_scripts}개")
             
+            # 🔍 상세 매칭 정보 로그
+            self.log_message(f"🔍 {cafe_name} 상세 매칭 분석:")
+            self.log_message(f"   📊 총 계정 수: {total_accounts}개")
+            self.log_message(f"   📊 총 URL 수: {len(urls)}개") 
+            self.log_message(f"   📊 총 원고 수: {total_scripts}개")
+            self.log_message(f"   📊 엑셀 행 수: {len(account_rows)}개")
+            
             # 원고 목록 출력
             for idx, script_folder in enumerate(script_folders):
                 script_name = os.path.basename(script_folder)
@@ -6910,7 +7158,7 @@ class CafePostingMainWindow(QMainWindow):
                 account_pw = row_data['password']
                 account_url = row_data['url']
                 
-                self.log_message(f"🔍 행{row_idx+1} 처리: {account_id}, URL={account_url[:30] if account_url else '없음'}...")
+                self.log_message(f"🔍 행{row_idx+1} 처리: {account_id}, URL={account_url[:50] if account_url else '없음'}...")
                 
                 if account_url:  # URL이 있는 행만 처리
                     if script_index < total_scripts:
@@ -6918,6 +7166,7 @@ class CafePostingMainWindow(QMainWindow):
                         scripts_for_this_row = [script_folders[script_index]]
                         script_name = os.path.basename(scripts_for_this_row[0])
                         self.log_message(f"✅ 행{row_idx+1} {account_id}: 원고 {script_index+1}번({script_name}) 할당")
+                        self.log_message(f"   🔗 매칭 상세: {account_id} → {account_url[:50]}... → {script_name}")
                         
                         # 매칭 데이터 저장 (행별로 고유 키 생성)
                         unique_key = f"{account_id}_row{row_idx+1}"
@@ -6935,10 +7184,12 @@ class CafePostingMainWindow(QMainWindow):
                     else:
                         # 원고 부족
                         self.log_message(f"⚠️ 행{row_idx+1} {account_id}: 원고 부족 - 여분 풀로 이동")
+                        self.log_message(f"   📊 원고 상황: {script_index+1}번째 원고 요청했지만 총 {total_scripts}개만 있음")
                         spare_accounts.append((account_id, account_pw))
                 else:
                     # URL 없음
                     self.log_message(f"⚠️ 행{row_idx+1} {account_id}: URL 없음 - 여분 풀로 이동")
+                    self.log_message(f"   🔍 URL 상태: 엑셀에서 URL 컬럼이 비어있거나 유효하지 않음")
                     spare_accounts.append((account_id, account_pw))
 
                     
@@ -6956,6 +7207,22 @@ class CafePostingMainWindow(QMainWindow):
                 self.log_message(f"🆘 {cafe_name}: {len(spare_accounts)}개 아이디를 여분 풀로 이동: {spare_account_names}")
             
             self.log_message(f"📊 {cafe_name} 매칭 결과: {used_scripts}개 작업 생성, {len(spare_accounts)}개 여분")
+            
+            # 🔍 매칭 결과 상세 분석 로그
+            self.log_message(f"🎯 {cafe_name} 최종 매칭 분석:")
+            self.log_message(f"   ✅ 처리될 원고: {used_scripts}개 (총 {total_scripts}개 중)")
+            self.log_message(f"   ❌ 처리 안될 원고: {total_scripts - used_scripts}개")
+            if total_scripts - used_scripts > 0:
+                self.log_message(f"   ⚠️ 처리 안되는 이유: URL 있는 엑셀 행 부족")
+            
+            # 실제 매칭된 작업 목록 로그
+            mapping_count = len(cafe_data['id_script_mapping'])
+            self.log_message(f"   📋 생성된 매칭: {mapping_count}개")
+            for unique_key, mapping_data in cafe_data['id_script_mapping'].items():
+                account_id = mapping_data['account_id']
+                script_name = os.path.basename(mapping_data['scripts'][0])
+                assigned_url = mapping_data['assigned_url']
+                self.log_message(f"      • {unique_key}: {account_id} → {script_name} → {assigned_url[:30]}...")
             
             # 테이블 업데이트
             self.update_individual_cafe_table(cafe_name)
@@ -7974,12 +8241,32 @@ class CafePostingMainWindow(QMainWindow):
 
     def start_work(self):
         """🏢 작업 시작 (카페별 탭 순차 처리)"""
-        # 🔍 로그 파일 상태 확인
+        # 🔍 로그 파일 상태 확인 및 강제 테스트
+        print("🔍 작업 시작 전 로그 파일 상태 확인...")
         log_health = self.verify_log_file_health()
+        
         if not log_health:
-            self.log_message("⚠️ 로그 파일 상태 불량 - 콘솔 로그로 진행")
+            print("⚠️ 로그 파일 상태 불량 감지 - 재초기화 시도...")
+            # 로그 시스템 재초기화 시도
+            try:
+                self.setup_logging()
+                log_health = self.verify_log_file_health()
+                if log_health:
+                    self.log_message("✅ 로그 시스템 재초기화 성공")
+                    print("✅ 로그 시스템 재초기화 성공")
+                else:
+                    self.log_message("⚠️ 로그 시스템 재초기화 실패 - 콘솔 로그로 진행")
+                    print("⚠️ 로그 시스템 재초기화 실패 - 콘솔 로그로 진행")
+            except Exception as reinit_error:
+                print(f"❌ 로그 시스템 재초기화 실패: {reinit_error}")
+                self.log_message("❌ 로그 시스템 재초기화 실패 - 콘솔 로그로 진행")
         else:
-            self.log_message("✅ 로그 파일 상태 정상")
+            self.log_message("✅ 로그 파일 상태 정상 - 작업 시작")
+            print("✅ 로그 파일 상태 정상 - 작업 시작")
+        
+        # 로그 테스트 메시지 추가
+        self.log_message("🧪 작업 시작 전 로그 테스트 - 이 메시지가 파일에 기록되는지 확인")
+        print("🧪 로그 테스트 완료 - 로그 파일을 확인해보세요")
         
         # 카페 폴더들 선택 검증
         if not hasattr(self, 'cafe_folders') or not self.cafe_folders:
@@ -9794,16 +10081,43 @@ class CafePostingMainWindow(QMainWindow):
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
         
-        # txt 파일에 로그 기록 (개선된 오류 처리)
+        # txt 파일에 로그 기록 (강화된 오류 처리)
         try:
             if hasattr(self, 'logger') and self.logger:
                 self.logger.info(message)
+                
+                # 즉시 플러시로 실시간 기록 보장
+                for handler in self.logger.handlers:
+                    if hasattr(handler, 'flush'):
+                        handler.flush()
+                        
             else:
-                # 로거가 없으면 콘솔에라도 출력
-                print(f"[LOG] {message}")
+                # 로거가 없으면 직접 파일에 기록 시도
+                if hasattr(self, 'log_file_path') and self.log_file_path:
+                    try:
+                        with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                            f.write(f"[{timestamp}] {message}\n")
+                            f.flush()  # 즉시 플러시
+                        print(f"[DIRECT] {message}")
+                    except Exception as direct_error:
+                        print(f"[CONSOLE] {message}")
+                        print(f"⚠️ 직접 파일 기록 실패: {direct_error}")
+                else:
+                    # 로거도 파일 경로도 없으면 콘솔에만 출력
+                    print(f"[CONSOLE] {message}")
+                    
         except Exception as e:
-            # 로그 실패 시 콘솔에 오류 출력
+            # 로그 실패 시 콘솔에 오류 출력 및 직접 파일 기록 시도
             print(f"⚠️ 로그 기록 실패: {e} - 메시지: {message}")
+            
+            # 마지막 수단: 직접 파일 기록 시도
+            if hasattr(self, 'log_file_path') and self.log_file_path:
+                try:
+                    with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                        f.write(f"[{timestamp}] [FALLBACK] {message}\n")
+                        f.flush()
+                except:
+                    pass  # 최종 실패해도 프로그램은 계속 진행
         
         # 스레드별 로그창이 있고 thread_id가 지정된 경우
         if thread_id is not None and thread_id in self.log_widgets:
@@ -9821,15 +10135,93 @@ class CafePostingMainWindow(QMainWindow):
             else:
                 return  # 로그창이 없으면 무시
         
-        log_widget.append(log_entry)
-        
-        # 스크롤을 맨 아래로
-        cursor = log_widget.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        log_widget.setTextCursor(cursor)
-        
-        # UI 업데이트
-        QApplication.processEvents()
+        # UI 로그창에 표시
+        try:
+            log_widget.append(log_entry)
+            
+            # 스크롤을 맨 아래로
+            cursor = log_widget.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            log_widget.setTextCursor(cursor)
+            
+            # UI 업데이트
+            QApplication.processEvents()
+        except Exception as ui_error:
+            # UI 로그 실패해도 파일 로그는 이미 기록됨
+            print(f"⚠️ UI 로그 표시 실패: {ui_error}")
+            pass
+
+    def setup_window_logging(self):
+        """윈도우별 로그 시스템 설정"""
+        try:
+            # 현재 날짜시간으로 로그 파일명 생성
+            current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.log_file_path = f"cafe_posting_log_{current_datetime}.txt"
+            
+            # 로거 설정
+            self.logger = logging.getLogger(f'CafePosting_Window_{id(self)}')
+            self.logger.setLevel(logging.INFO)
+            
+            # 기존 핸들러 제거 (중복 방지)
+            for handler in self.logger.handlers[:]:
+                self.logger.removeHandler(handler)
+            
+            # 파일 핸들러 추가
+            file_handler = logging.FileHandler(self.log_file_path, encoding='utf-8')
+            file_handler.setLevel(logging.INFO)
+            
+            # 로그 포맷 설정
+            formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+            file_handler.setFormatter(formatter)
+            
+            self.logger.addHandler(file_handler)
+            
+            # 초기 로그 기록
+            self.logger.info("=" * 100)
+            self.logger.info(f"🤖 네이버 카페 수정발행 자동화 프로그램 v{__version__} 시작")
+            self.logger.info(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            self.logger.info(f"📂 로그 파일: {self.log_file_path}")
+            self.logger.info(f"💻 머신 ID: {get_machine_id()}")
+            self.logger.info(f"🖥️ 작업 디렉토리: {os.getcwd()}")
+            self.logger.info("=" * 100)
+            
+            print(f"📝 로그 파일 생성됨: {self.log_file_path}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ 윈도우 로그 설정 실패: {e}")
+            self.log_file_path = None
+            self.logger = None
+            return False
+    
+    def verify_log_file_health(self):
+        """로그 파일 상태 확인"""
+        try:
+            if not hasattr(self, 'log_file_path') or not self.log_file_path:
+                return False
+            
+            if not os.path.exists(self.log_file_path):
+                return False
+            
+            # 테스트 메시지 기록 시도
+            test_message = f"🧪 로그 상태 테스트: {datetime.now().strftime('%H:%M:%S')}"
+            if hasattr(self, 'logger') and self.logger:
+                self.logger.info(test_message)
+                for handler in self.logger.handlers:
+                    if hasattr(handler, 'flush'):
+                        handler.flush()
+            
+            # 파일에 실제로 기록되었는지 확인
+            with open(self.log_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if test_message in content:
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"❌ 로그 파일 상태 확인 실패: {e}")
+            return False
 
     def log_message_with_thread(self, message, thread_id):
         """스레드별 로그 메시지 처리 (시그널 연결용)"""
@@ -10092,8 +10484,23 @@ class CafePostingMainWindow(QMainWindow):
             
             self.log_message("👋 프로그램이 정상적으로 종료됩니다 (사용자 Chrome 보호됨)")
             
+            # 🔥 종료 시 로그 파일 최종 정리
+            if hasattr(self, 'logger') and self.logger:
+                self.logger.info("=" * 100)
+                self.logger.info(f"👋 프로그램 종료: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                self.logger.info(f"📊 총 처리 결과: {len(self.results)}개")
+                if hasattr(self, 'worker') and self.worker and hasattr(self.worker, 'account_status_log'):
+                    self.logger.info(f"📋 계정 상태 로그: {len(self.worker.account_status_log)}개 계정")
+                self.logger.info("=" * 100)
+                
+                # 로그 핸들러 정리
+                for handler in self.logger.handlers:
+                    handler.close()
+                    self.logger.removeHandler(handler)
+            
         except Exception as e:
             print(f"프로그램 종료 중 오류: {e}")
+            log_error(f"프로그램 종료 중 오류: {e}")
         
         # 기본 종료 이벤트 처리
         event.accept()
@@ -10130,10 +10537,20 @@ load_app_config()
 
 def main():
     """메인 함수"""
+    # 📝 로그 시스템 초기화 (가장 먼저)
+    log_filename = setup_logging()
+    if log_filename:
+        log_info(f"📂 로그 파일 생성됨: {log_filename}")
+    else:
+        print("⚠️ 로그 파일 생성 실패 - 콘솔 로그만 사용")
+    
     # 🔐 라이선스 체크 (프로그램 시작 전)
+    log_info("🔐 라이선스 인증 시작...")
     if not check_license():
+        log_error("라이선스 인증 실패 - 프로그램을 종료합니다.")
         print("❌ 라이선스 인증 실패 - 프로그램을 종료합니다.")
         return
+    log_info("✅ 라이선스 인증 성공!")
     
     print("=" * 60)
     print(f"🤖 네이버 카페 포스팅 자동화 프로그램 v{__version__}")
@@ -10146,15 +10563,15 @@ def main():
     print("   • 사용으로 인한 모든 책임은 사용자에게 있습니다")
     print("=" * 60)
     
-    # 🔄 업데이트 확인 (백그라운드에서)
+    app = QApplication(sys.argv)
+    
+    # 🔄 업데이트 확인 (QApplication 생성 후)
     try:
         print("🔄 업데이트 확인 중...")
         updater = Updater(__version__, "hyunryoung/MTEworld")
         updater.check_for_updates()
     except Exception as e:
         print(f"⚠️ 업데이트 확인 실패: {e}")
-    
-    app = QApplication(sys.argv)
     app.setStyle('Fusion')
     
     # 애플리케이션 정보 설정
