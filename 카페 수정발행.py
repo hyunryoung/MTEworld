@@ -7,13 +7,13 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.2.1
+Version: 0.2.3
 Author: MTEworld
 Last Updated: 2025-10-02
 """
 
 # 🔢 버전 정보
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 __build_date__ = "2025-10-02"
 __author__ = "MTEworld"
 
@@ -57,69 +57,6 @@ import platform  # 🔐 라이선스 시스템용 추가
 import urllib.request  # 🔄 업데이트 체크용 추가
 import zipfile  # 🔄 업데이트 파일 압축 해제용
 import glob  # 🔄 임시 디렉토리 정리용
-
-# 📝 === 로그 시스템 설정 ===
-def setup_logging():
-    """날짜별 로그 파일 설정"""
-    try:
-        # 현재 날짜로 로그 파일명 생성
-        current_date = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_filename = f"cafe_posting_log_{current_date}.txt"
-        
-        # 로그 설정
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s [%(levelname)s] %(message)s',
-            handlers=[
-                logging.FileHandler(log_filename, encoding='utf-8'),
-                logging.StreamHandler(sys.stdout)  # 콘솔에도 출력
-            ]
-        )
-        
-        # 전역 로거 생성
-        global app_logger
-        app_logger = logging.getLogger('CafePosting')
-        
-        # 시작 로그
-        app_logger.info("=" * 80)
-        app_logger.info(f"🤖 네이버 카페 수정발행 자동화 프로그램 v{__version__} 시작")
-        app_logger.info(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        app_logger.info(f"📂 로그 파일: {log_filename}")
-        app_logger.info("=" * 80)
-        
-        return log_filename
-        
-    except Exception as e:
-        print(f"❌ 로그 설정 실패: {e}")
-        return None
-
-# 로그 헬퍼 함수
-def log_info(message):
-    """정보 로그"""
-    try:
-        if 'app_logger' in globals():
-            app_logger.info(message)
-        print(message)
-    except:
-        print(message)
-
-def log_error(message):
-    """에러 로그"""
-    try:
-        if 'app_logger' in globals():
-            app_logger.error(message)
-        print(f"❌ {message}")
-    except:
-        print(f"❌ {message}")
-
-def log_warning(message):
-    """경고 로그"""
-    try:
-        if 'app_logger' in globals():
-            app_logger.warning(message)
-        print(f"⚠️ {message}")
-    except:
-        print(f"⚠️ {message}")
 
 # 🔐 === 라이선스 시스템 ===
 def get_machine_id():
@@ -1900,12 +1837,7 @@ class CafePostingWorker(QThread):
         return bool(re.match(valid_pattern, url))
     
     def emit_progress(self, message, thread_id=None):
-        """스레드별 로그 전송 헬퍼 함수 (로그 파일 기록 포함)"""
-        # 로그 파일에도 기록 (메인 윈도우를 통해)
-        if self.main_window and hasattr(self.main_window, 'log_message'):
-            self.main_window.log_message(message, thread_id)
-        
-        # 기존 시그널 전송
+        """스레드별 로그 전송 헬퍼 함수"""
         if thread_id is not None:
             self.signals.progress_with_thread.emit(message, thread_id)
         else:
@@ -5834,7 +5766,7 @@ class CafePostingMainWindow(QMainWindow):
         self.setMinimumSize(1200, 800)
         
         # 🔥 로그 파일 설정 (프로그램 시작 시 초기화)
-        self.setup_window_logging()
+        self.setup_logging()
         
         # 데이터 저장
         self.reply_accounts = []
@@ -7136,13 +7068,6 @@ class CafePostingMainWindow(QMainWindow):
             self.log_message(f"📋 {cafe_name} 엑셀 행 정보: 총 {len(account_rows)}행")
             self.log_message(f"📝 사용 가능한 원고: 총 {total_scripts}개")
             
-            # 🔍 상세 매칭 정보 로그
-            self.log_message(f"🔍 {cafe_name} 상세 매칭 분석:")
-            self.log_message(f"   📊 총 계정 수: {total_accounts}개")
-            self.log_message(f"   📊 총 URL 수: {len(urls)}개") 
-            self.log_message(f"   📊 총 원고 수: {total_scripts}개")
-            self.log_message(f"   📊 엑셀 행 수: {len(account_rows)}개")
-            
             # 원고 목록 출력
             for idx, script_folder in enumerate(script_folders):
                 script_name = os.path.basename(script_folder)
@@ -7157,7 +7082,7 @@ class CafePostingMainWindow(QMainWindow):
                 account_pw = row_data['password']
                 account_url = row_data['url']
                 
-                self.log_message(f"🔍 행{row_idx+1} 처리: {account_id}, URL={account_url[:50] if account_url else '없음'}...")
+                self.log_message(f"🔍 행{row_idx+1} 처리: {account_id}, URL={account_url[:30] if account_url else '없음'}...")
                 
                 if account_url:  # URL이 있는 행만 처리
                     if script_index < total_scripts:
@@ -7165,7 +7090,6 @@ class CafePostingMainWindow(QMainWindow):
                         scripts_for_this_row = [script_folders[script_index]]
                         script_name = os.path.basename(scripts_for_this_row[0])
                         self.log_message(f"✅ 행{row_idx+1} {account_id}: 원고 {script_index+1}번({script_name}) 할당")
-                        self.log_message(f"   🔗 매칭 상세: {account_id} → {account_url[:50]}... → {script_name}")
                         
                         # 매칭 데이터 저장 (행별로 고유 키 생성)
                         unique_key = f"{account_id}_row{row_idx+1}"
@@ -7183,12 +7107,10 @@ class CafePostingMainWindow(QMainWindow):
                     else:
                         # 원고 부족
                         self.log_message(f"⚠️ 행{row_idx+1} {account_id}: 원고 부족 - 여분 풀로 이동")
-                        self.log_message(f"   📊 원고 상황: {script_index+1}번째 원고 요청했지만 총 {total_scripts}개만 있음")
                         spare_accounts.append((account_id, account_pw))
                 else:
                     # URL 없음
                     self.log_message(f"⚠️ 행{row_idx+1} {account_id}: URL 없음 - 여분 풀로 이동")
-                    self.log_message(f"   🔍 URL 상태: 엑셀에서 URL 컬럼이 비어있거나 유효하지 않음")
                     spare_accounts.append((account_id, account_pw))
 
                     
@@ -7206,22 +7128,6 @@ class CafePostingMainWindow(QMainWindow):
                 self.log_message(f"🆘 {cafe_name}: {len(spare_accounts)}개 아이디를 여분 풀로 이동: {spare_account_names}")
             
             self.log_message(f"📊 {cafe_name} 매칭 결과: {used_scripts}개 작업 생성, {len(spare_accounts)}개 여분")
-            
-            # 🔍 매칭 결과 상세 분석 로그
-            self.log_message(f"🎯 {cafe_name} 최종 매칭 분석:")
-            self.log_message(f"   ✅ 처리될 원고: {used_scripts}개 (총 {total_scripts}개 중)")
-            self.log_message(f"   ❌ 처리 안될 원고: {total_scripts - used_scripts}개")
-            if total_scripts - used_scripts > 0:
-                self.log_message(f"   ⚠️ 처리 안되는 이유: URL 있는 엑셀 행 부족")
-            
-            # 실제 매칭된 작업 목록 로그
-            mapping_count = len(cafe_data['id_script_mapping'])
-            self.log_message(f"   📋 생성된 매칭: {mapping_count}개")
-            for unique_key, mapping_data in cafe_data['id_script_mapping'].items():
-                account_id = mapping_data['account_id']
-                script_name = os.path.basename(mapping_data['scripts'][0])
-                assigned_url = mapping_data['assigned_url']
-                self.log_message(f"      • {unique_key}: {account_id} → {script_name} → {assigned_url[:30]}...")
             
             # 테이블 업데이트
             self.update_individual_cafe_table(cafe_name)
@@ -10150,77 +10056,6 @@ class CafePostingMainWindow(QMainWindow):
             print(f"⚠️ UI 로그 표시 실패: {ui_error}")
             pass
 
-    def setup_window_logging(self):
-        """윈도우별 로그 시스템 설정"""
-        try:
-            # 현재 날짜시간으로 로그 파일명 생성
-            current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.log_file_path = f"cafe_posting_log_{current_datetime}.txt"
-            
-            # 로거 설정
-            self.logger = logging.getLogger(f'CafePosting_Window_{id(self)}')
-            self.logger.setLevel(logging.INFO)
-            
-            # 기존 핸들러 제거 (중복 방지)
-            for handler in self.logger.handlers[:]:
-                self.logger.removeHandler(handler)
-            
-            # 파일 핸들러 추가
-            file_handler = logging.FileHandler(self.log_file_path, encoding='utf-8')
-            file_handler.setLevel(logging.INFO)
-            
-            # 로그 포맷 설정
-            formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-            file_handler.setFormatter(formatter)
-            
-            self.logger.addHandler(file_handler)
-            
-            # 초기 로그 기록
-            self.logger.info("=" * 100)
-            self.logger.info(f"🤖 네이버 카페 수정발행 자동화 프로그램 v{__version__} 시작")
-            self.logger.info(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            self.logger.info(f"📂 로그 파일: {self.log_file_path}")
-            self.logger.info(f"🖥️ 작업 디렉토리: {os.getcwd()}")
-            self.logger.info("=" * 100)
-            
-            print(f"📝 로그 파일 생성됨: {self.log_file_path}")
-            return True
-            
-        except Exception as e:
-            print(f"❌ 윈도우 로그 설정 실패: {e}")
-            self.log_file_path = None
-            self.logger = None
-            return False
-    
-    def verify_log_file_health(self):
-        """로그 파일 상태 확인"""
-        try:
-            if not hasattr(self, 'log_file_path') or not self.log_file_path:
-                return False
-            
-            if not os.path.exists(self.log_file_path):
-                return False
-            
-            # 테스트 메시지 기록 시도
-            test_message = f"🧪 로그 상태 테스트: {datetime.now().strftime('%H:%M:%S')}"
-            if hasattr(self, 'logger') and self.logger:
-                self.logger.info(test_message)
-                for handler in self.logger.handlers:
-                    if hasattr(handler, 'flush'):
-                        handler.flush()
-            
-            # 파일에 실제로 기록되었는지 확인
-            with open(self.log_file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                if test_message in content:
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            print(f"❌ 로그 파일 상태 확인 실패: {e}")
-            return False
-
     def log_message_with_thread(self, message, thread_id):
         """스레드별 로그 메시지 처리 (시그널 연결용)"""
         self.log_message(message, thread_id)
@@ -10482,23 +10317,8 @@ class CafePostingMainWindow(QMainWindow):
             
             self.log_message("👋 프로그램이 정상적으로 종료됩니다 (사용자 Chrome 보호됨)")
             
-            # 🔥 종료 시 로그 파일 최종 정리
-            if hasattr(self, 'logger') and self.logger:
-                self.logger.info("=" * 100)
-                self.logger.info(f"👋 프로그램 종료: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                self.logger.info(f"📊 총 처리 결과: {len(self.results)}개")
-                if hasattr(self, 'worker') and self.worker and hasattr(self.worker, 'account_status_log'):
-                    self.logger.info(f"📋 계정 상태 로그: {len(self.worker.account_status_log)}개 계정")
-                self.logger.info("=" * 100)
-                
-                # 로그 핸들러 정리
-                for handler in self.logger.handlers:
-                    handler.close()
-                    self.logger.removeHandler(handler)
-            
         except Exception as e:
             print(f"프로그램 종료 중 오류: {e}")
-            log_error(f"프로그램 종료 중 오류: {e}")
         
         # 기본 종료 이벤트 처리
         event.accept()
@@ -10535,20 +10355,10 @@ load_app_config()
 
 def main():
     """메인 함수"""
-    # 📝 로그 시스템 초기화 (가장 먼저)
-    log_filename = setup_logging()
-    if log_filename:
-        log_info(f"📂 로그 파일 생성됨: {log_filename}")
-    else:
-        print("⚠️ 로그 파일 생성 실패 - 콘솔 로그만 사용")
-    
     # 🔐 라이선스 체크 (프로그램 시작 전)
-    log_info("🔐 라이선스 인증 시작...")
     if not check_license():
-        log_error("라이선스 인증 실패 - 프로그램을 종료합니다.")
         print("❌ 라이선스 인증 실패 - 프로그램을 종료합니다.")
         return
-    log_info("✅ 라이선스 인증 성공!")
     
     print("=" * 60)
     print(f"🤖 네이버 카페 포스팅 자동화 프로그램 v{__version__}")
