@@ -13,7 +13,7 @@ Last Updated: 2025-10-02
 """
 
 # 🔢 버전 정보
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __build_date__ = "2025-10-02"
 __author__ = "MTEworld"
 
@@ -85,7 +85,6 @@ def setup_logging():
         app_logger.info(f"🤖 네이버 카페 수정발행 자동화 프로그램 v{__version__} 시작")
         app_logger.info(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         app_logger.info(f"📂 로그 파일: {log_filename}")
-        app_logger.info(f"💻 머신 ID: {get_machine_id()}")
         app_logger.info("=" * 80)
         
         return log_filename
@@ -10181,7 +10180,6 @@ class CafePostingMainWindow(QMainWindow):
             self.logger.info(f"🤖 네이버 카페 수정발행 자동화 프로그램 v{__version__} 시작")
             self.logger.info(f"📅 실행 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             self.logger.info(f"📂 로그 파일: {self.log_file_path}")
-            self.logger.info(f"💻 머신 ID: {get_machine_id()}")
             self.logger.info(f"🖥️ 작업 디렉토리: {os.getcwd()}")
             self.logger.info("=" * 100)
             
