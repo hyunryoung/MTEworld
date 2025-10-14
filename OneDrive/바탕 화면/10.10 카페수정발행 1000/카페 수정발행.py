@@ -7,14 +7,14 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.2.3
+Version: 0.2.4
 Author: MTEworld
-Last Updated: 2025-10-10
+Last Updated: 2025-10-14
 """
 
 # 🔢 버전 정보
-__version__ = "0.2.3"
-__build_date__ = "2025-10-10"
+__version__ = "0.2.4"
+__build_date__ = "2025-10-14"
 __author__ = "MTEworld"
 
 # 🔄 업데이트 관련 설정
@@ -2719,9 +2719,9 @@ class CafePostingWorker(QThread):
                     
                     del self.drivers[key]
             
-            # 짧은 대기 시간
-            self.emit_progress(f"⏳ [쓰레드{thread_id}] 답글용 브라우저 정리 완료 - 댓글 작성 준비", thread_id)
-            time.sleep(1)  # 짧은 대기
+            # 🔧 브라우저 종료 후 안정화 대기 시간 증가 (1초 → 3초)
+            self.emit_progress(f"⏳ [쓰레드{thread_id}] 답글용 브라우저 정리 완료 - 댓글 작성 준비 (3초 대기)", thread_id)
+            time.sleep(3)  # 크롬 프로세스 완전 종료 대기
             
             # 가비지 컬렉션으로 메모리 정리
             gc.collect()
@@ -3413,6 +3413,14 @@ class CafePostingWorker(QThread):
         total_count = len(parser.comments)
         self.emit_progress(f"🎉 댓글 작성 완료 - {total_count}개 중 {success_count}개 댓글 처리 완료", thread_id)
         
+        # 🔧 댓글 작성 완료 후 안정화 대기 (크롬창 정리 시간 확보)
+        stabilization_time = 15
+        self.emit_progress(f"⏳ 작업 완료 후 {stabilization_time}초 안정화 대기 중...", thread_id)
+        for _ in range(stabilization_time):
+            if not self.is_running:
+                break
+            time.sleep(1)
+        
         return success_count, total_count  # 성공/전체 댓글 개수 반환
     
     def process_single_comment(self, thread_id, reply_url, comment, reply_account, comment_index, total_comments, written_comments):
@@ -3692,19 +3700,22 @@ class CafePostingWorker(QThread):
                 return True  # 성공
             
             except Exception as e:
-                self.emit_progress(f"❌ [스레드{thread_id+1}] 댓글 {comment_index+1} 계정 {account[0]} 시도 실패: {str(e)}", thread_id)
+                # 🔧 account 변수가 할당되었는지 확인
+                account_info = account[0] if 'account' in locals() and account else "알 수 없음"
+                self.emit_progress(f"❌ [스레드{thread_id+1}] 댓글 {comment_index+1} 계정 {account_info} 시도 실패: {str(e)}", thread_id)
                 
                 # 실패 시 개별 드라이버만 정리
                 try:
                     if 'driver' in locals():
                         self.logout_naver(driver)
                         driver.quit()
-                        # 드라이버 딕셔너리에서도 제거
-                        driver_key = f"{thread_id}_{account_type}_{account[0]}"
-                        with self.drivers_lock:
-                            if driver_key in self.drivers:
-                                del self.drivers[driver_key]
-                                                    # 🔧 실패 로그도 제거
+                        # 드라이버 딕셔너리에서도 제거 (account가 존재하는 경우에만)
+                        if 'account' in locals() and account and 'account_type' in locals():
+                            driver_key = f"{thread_id}_{account_type}_{account[0]}"
+                            with self.drivers_lock:
+                                if driver_key in self.drivers:
+                                    del self.drivers[driver_key]
+                                                        # 🔧 실패 로그도 제거
                 except:
                     pass
                 
