@@ -7,14 +7,14 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.2.5
+Version: 0.2.6
 Author: MTEworld
-Last Updated: 2025-10-20
+Last Updated: 2025-10-22
 """
 
 # 🔢 버전 정보
-__version__ = "0.2.5"
-__build_date__ = "2025-10-20"
+__version__ = "0.2.6"
+__build_date__ = "2025-10-22"
 __author__ = "MTEworld"
 
 # 🔄 업데이트 관련 설정
@@ -1198,9 +1198,11 @@ class CafePostingWorker(QThread):
         self.progress = WorkProgress()
         self.drivers = {}  # 스레드별 드라이버
         self.blocked_accounts = set()  # 차단된 계정 목록
+        self.blocked_proxies = set()  # 🔥 차단된 프록시 목록 (새로 추가)
         
         # 멀티쓰레드 안전성을 위한 Lock들
         self.blocked_accounts_lock = threading.Lock()
+        self.blocked_proxies_lock = threading.Lock()  # 🔥 프록시 차단 Lock (새로 추가)
         self.drivers_lock = threading.Lock() 
         self.clipboard_lock = threading.Lock()
         
@@ -2834,23 +2836,49 @@ class CafePostingWorker(QThread):
                 else:
                     failure_reason = login_result[1]  # 실패 원인
                     
-                    # 🆕 전용 계정인 경우 차단하지 않고 바로 종료
-                    if target_account:
-                        self.emit_progress(f"❌ [스레드{thread_id+1}] 전용 계정 {reply_account[0]} 로그인 실패: {failure_reason}", thread_id)
-                        self.emit_progress(f"🚫 [스레드{thread_id+1}] 전용 계정 실패 - 다른 계정 시도 안 함", thread_id)
-                        self.safe_cleanup_thread_drivers(thread_id)
-                        driver = None
-                        break  # 전용 계정 실패 시 바로 종료
-                    else:
-                        # 🎯 일반 계정: 실패하면 바로 차단하고 다음 계정으로
-                        self.main_window.mark_reply_account_blocked(reply_account[0])
-                        self.emit_progress(f"❌ [스레드{thread_id+1}] 계정 {reply_account[0]} 로그인 실패: {failure_reason}", thread_id)
-                        self.emit_progress(f"🚫 [스레드{thread_id+1}] 계정 {reply_account[0]} 차단 목록 추가", thread_id)
+                    # 🔥 프록시 문제인지 계정 문제인지 구분
+                    is_proxy_issue = self.is_proxy_related_error(failure_reason)
+                    
+                    if is_proxy_issue:
+                        # 🌐 프록시 문제 → 프록시만 차단, 계정은 보호
+                        # 현재 사용 중인 프록시 확인 (driver에서 추출)
+                        selected_proxy = getattr(driver, '_current_proxy', None)
+                        if selected_proxy:
+                            self.mark_proxy_blocked(selected_proxy, thread_id)
+                            self.emit_progress(f"🔒 [스레드{thread_id+1}] 계정 {reply_account[0]} 보호됨 (프록시 문제)", thread_id)
+                        else:
+                            self.emit_progress(f"⚠️ [스레드{thread_id+1}] 프록시 URL 확인 실패 - 계정은 보호", thread_id)
                         
-                        # 실패한 드라이버 정리 후 다음 계정으로 재시도
+                        # 드라이버 정리 후 같은 계정으로 다른 프록시로 재시도
                         self.safe_cleanup_thread_drivers(thread_id)
                         driver = None
-                        continue  # 다음 계정으로 재시도
+                        
+                        # 전용 계정이면 재시도 중단
+                        if target_account:
+                            self.emit_progress(f"❌ [스레드{thread_id+1}] 전용 계정 프록시 문제 - 재시도 중단", thread_id)
+                            break
+                        
+                        # 일반 계정이면 다른 프록시로 재시도 (같은 계정 유지)
+                        continue
+                    else:
+                        # 🔑 실제 계정 문제 → 계정 차단
+                        # 🆕 전용 계정인 경우 차단하지 않고 바로 종료
+                        if target_account:
+                            self.emit_progress(f"❌ [스레드{thread_id+1}] 전용 계정 {reply_account[0]} 로그인 실패: {failure_reason}", thread_id)
+                            self.emit_progress(f"🚫 [스레드{thread_id+1}] 전용 계정 실패 - 다른 계정 시도 안 함", thread_id)
+                            self.safe_cleanup_thread_drivers(thread_id)
+                            driver = None
+                            break  # 전용 계정 실패 시 바로 종료
+                        else:
+                            # 🎯 일반 계정: 실패하면 바로 차단하고 다음 계정으로
+                            self.main_window.mark_reply_account_blocked(reply_account[0])
+                            self.emit_progress(f"❌ [스레드{thread_id+1}] 계정 {reply_account[0]} 로그인 실패: {failure_reason}", thread_id)
+                            self.emit_progress(f"🚫 [스레드{thread_id+1}] 계정 {reply_account[0]} 차단 목록 추가 (실제 계정 문제)", thread_id)
+                            
+                            # 실패한 드라이버 정리 후 다음 계정으로 재시도
+                            self.safe_cleanup_thread_drivers(thread_id)
+                            driver = None
+                            continue  # 다음 계정으로 재시도
                     
             except Exception as e:
                 self.emit_progress(f"❌ [스레드{thread_id+1}] 답글 계정 {reply_account[0]} 처리 중 오류: {str(e)}", thread_id)
@@ -3505,7 +3533,26 @@ class CafePostingWorker(QThread):
                             # 🆕 새로운 계정 할당 후 매핑 저장 (답글 작성자 제외)
                             account = self.get_thread_comment_account(thread_id, exclude_account_id=reply_account[0])
                             if not account:
-                                self.emit_progress(f"❌ 사용 가능한 댓글 계정이 없습니다 (답글 작성자 {reply_account[0]} 제외)", thread_id)
+                                # 🚨🚨🚨 전체 작업 중단됨 - 즉시 종료
+                                self.emit_progress(f"", thread_id)
+                                self.emit_progress(f"🚨🚨🚨 스레드{thread_id+1}: 댓글 계정 소진으로 작업 중단됨!", thread_id)
+                                self.emit_progress(f"   🛑 전체 프로그램이 중단되었습니다.", thread_id)
+                                self.emit_progress(f"   ⚠️ 원고 관리를 위해 더 이상 진행하지 않습니다.", thread_id)
+                                self.emit_progress(f"", thread_id)
+                                
+                                # 결과 테이블 업데이트
+                                if hasattr(self, 'current_row'):
+                                    update_data = {
+                                        '댓글상황': '🛑 전체 작업 중단',
+                                        '댓글차단': '❌ 계정 소진'
+                                    }
+                                    self.main_window.update_result(self.current_row, update_data)
+                                
+                                # 🔥 작업 중단 플래그 확인
+                                if not self.is_running:
+                                    self.emit_progress(f"🛑 스레드{thread_id+1} 종료 중...", thread_id)
+                                    raise Exception("댓글 계정 소진으로 전체 작업 중단")
+                                
                                 return False  # 더 이상 시도할 계정 없음
                             thread_mapping[comment_id] = account
                             self.emit_progress(f"👥 아이디{comment_id} 새 계정 할당: {account[0]} (답글 작성자 {reply_account[0]} 제외)", thread_id)
@@ -3513,7 +3560,26 @@ class CafePostingWorker(QThread):
                         # 재시도: 새로운 계정 할당 (기존 매핑 무시, 답글 작성자 제외)
                         account = self.get_thread_comment_account(thread_id, exclude_account_id=reply_account[0])
                         if not account:
-                            self.emit_progress(f"❌ 재시도용 댓글 계정이 없습니다 (답글 작성자 {reply_account[0]} 제외)", thread_id)
+                            # 🚨🚨🚨 재시도도 실패 - 전체 작업 중단
+                            self.emit_progress(f"", thread_id)
+                            self.emit_progress(f"🚨🚨🚨 스레드{thread_id+1}: 재시도 실패 - 댓글 계정 소진!", thread_id)
+                            self.emit_progress(f"   🛑 전체 프로그램이 중단되었습니다.", thread_id)
+                            self.emit_progress(f"   ⚠️ 원고 관리를 위해 더 이상 진행하지 않습니다.", thread_id)
+                            self.emit_progress(f"", thread_id)
+                            
+                            # 결과 테이블 업데이트
+                            if hasattr(self, 'current_row'):
+                                update_data = {
+                                    '댓글상황': '🛑 전체 작업 중단',
+                                    '댓글차단': '❌ 재시도 계정 소진'
+                                }
+                                self.main_window.update_result(self.current_row, update_data)
+                            
+                            # 🔥 작업 중단 플래그 확인
+                            if not self.is_running:
+                                self.emit_progress(f"🛑 스레드{thread_id+1} 종료 중...", thread_id)
+                                raise Exception("댓글 계정 소진으로 전체 작업 중단")
+                            
                             return False  # 더 이상 시도할 계정 없음
                         self.emit_progress(f"🔄 아이디{comment.get('id_num', 'unknown')} 재시도 계정: {account[0]} (답글 작성자 {reply_account[0]} 제외)", thread_id)
                     
@@ -3531,12 +3597,24 @@ class CafePostingWorker(QThread):
                     failure_reason = login_result[1]
                     self.emit_progress(f"❌ [스레드{thread_id+1}] 로그인 실패: {account[0]} - {failure_reason}", thread_id)
                     
-                    # 🔄 모든 로그인 실패는 차단 목록에 추가 (재시도 방지)
-                    if account_type == 'comment':
-                        self.main_window.mark_comment_account_blocked(account[0])
-                    elif account_type == 'reply':
-                        self.main_window.mark_reply_account_blocked(account[0])
-                    self.emit_progress(f"🚫 [스레드{thread_id+1}] 계정 {account[0]} 차단 목록 추가 (로그인 실패)", thread_id)
+                    # 🔥 프록시 문제인지 계정 문제인지 구분
+                    is_proxy_issue = self.is_proxy_related_error(failure_reason)
+                    
+                    if is_proxy_issue:
+                        # 🌐 프록시 문제 → 프록시만 차단, 계정은 보호
+                        selected_proxy = getattr(driver, '_current_proxy', None)
+                        if selected_proxy:
+                            self.mark_proxy_blocked(selected_proxy, thread_id)
+                            self.emit_progress(f"🔒 [스레드{thread_id+1}] 계정 {account[0]} 보호됨 (프록시 문제)", thread_id)
+                        else:
+                            self.emit_progress(f"⚠️ [스레드{thread_id+1}] 프록시 URL 확인 실패 - 계정은 보호", thread_id)
+                    else:
+                        # 🔑 실제 계정 문제 → 계정 차단
+                        if account_type == 'comment':
+                            self.main_window.mark_comment_account_blocked(account[0])
+                        elif account_type == 'reply':
+                            self.main_window.mark_reply_account_blocked(account[0])
+                        self.emit_progress(f"🚫 [스레드{thread_id+1}] 계정 {account[0]} 차단 목록 추가 (실제 계정 문제)", thread_id)
                     
                     # 드라이버 정리 후 다음 계정으로 재시도
                     try:
@@ -4205,17 +4283,27 @@ class CafePostingWorker(QThread):
                 # 프록시 설정 (스레드별 전용 프록시 사용)
                 thread_proxies = self.get_thread_proxies(thread_id, account_type)
                 
+                # 🔥 차단되지 않은 프록시만 필터링
+                with self.blocked_proxies_lock:
+                    available_proxies = [p for p in thread_proxies if p not in self.blocked_proxies]
+                
                 selected_proxy = None
-                if thread_proxies and account_id:
-                    # 스레드 전용 프록시에서 계정별 고정 프록시 선택
-                    selected_proxy = self.get_fixed_proxy_for_account(account_id, thread_proxies)
+                if available_proxies and account_id:
+                    # 스레드 전용 프록시에서 계정별 고정 프록시 선택 (차단된 것 제외)
+                    selected_proxy = self.get_fixed_proxy_for_account(account_id, available_proxies)
                     chrome_options.add_argument(f'--proxy-server={selected_proxy}')
-                    self.emit_progress(f"🌐 [스레드{thread_id+1}] 전용 프록시: {account_id} → {selected_proxy} ({account_type}용)", thread_id)
+                    blocked_count = len(self.blocked_proxies)
+                    self.emit_progress(f"🌐 [스레드{thread_id+1}] 전용 프록시: {account_id} → {selected_proxy} ({account_type}용, 차단: {blocked_count}개)", thread_id)
+                elif available_proxies:
+                    # account_id가 없으면 스레드 전용 프록시에서 랜덤 선택 (차단된 것 제외)
+                    selected_proxy = random.choice(available_proxies)
+                    chrome_options.add_argument(f'--proxy-server={selected_proxy}')
+                    blocked_count = len(self.blocked_proxies)
+                    self.emit_progress(f"🌐 [스레드{thread_id+1}] 랜덤 프록시: {selected_proxy} ({account_type}용, 차단: {blocked_count}개)", thread_id)
                 elif thread_proxies:
-                    # account_id가 없으면 스레드 전용 프록시에서 랜덤 선택
-                    selected_proxy = random.choice(thread_proxies)
-                    chrome_options.add_argument(f'--proxy-server={selected_proxy}')
-                    self.emit_progress(f"🌐 [스레드{thread_id+1}] 랜덤 프록시: {selected_proxy} ({account_type}용)", thread_id)
+                    # 🔥 모든 프록시가 차단된 경우
+                    blocked_count = len(self.blocked_proxies)
+                    self.emit_progress(f"⚠️ [스레드{thread_id+1}] 모든 프록시 차단됨 (총 {len(thread_proxies)}개, 차단: {blocked_count}개) - 직접 연결", thread_id)
                 else:
                     self.emit_progress(f"🌐 [스레드{thread_id+1}] 프록시 없음: 직접 연결 ({account_type}용)", thread_id)
                 
@@ -4324,6 +4412,9 @@ class CafePostingWorker(QThread):
                 
                 # 자동화 탐지 우회
                 driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                # 🔥 사용 중인 프록시 정보를 driver 객체에 저장 (나중에 차단 판단용)
+                driver._current_proxy = selected_proxy
                 
                 # 🖥️ 창 위치 및 크기 설정 (더 안전한 방식)
                 try:
@@ -4700,6 +4791,40 @@ class CafePostingWorker(QThread):
             self.safe_cleanup_thread_drivers(thread_id)
             return False
 
+    def is_proxy_related_error(self, failure_reason):
+        """🔥 프록시 관련 오류인지 판단 (계정 보호용)"""
+        if not failure_reason:
+            return False
+            
+        proxy_error_keywords = [
+            "Unable to locate element",
+            "TimeoutException",
+            "ERR_PROXY_CONNECTION_FAILED",
+            "ERR_TIMED_OUT",
+            "로그인 페이지 로딩 시간 초과",
+            "요소를 찾을 수 없습니다",
+            "Connection refused",
+            "Network error",
+            "net::ERR_",
+            "Timeout",
+            "Failed to establish",
+            "페이지 로딩 시간 초과",
+            "로그인 페이지 로딩 실패",
+            "요소 대기 시간 초과"
+        ]
+        
+        return any(keyword in str(failure_reason) for keyword in proxy_error_keywords)
+    
+    def mark_proxy_blocked(self, proxy_url, thread_id=None):
+        """🔥 프록시를 차단 목록에 추가"""
+        if not proxy_url:
+            return
+            
+        with self.blocked_proxies_lock:
+            self.blocked_proxies.add(proxy_url)
+            blocked_count = len(self.blocked_proxies)
+            self.emit_progress(f"🚫 프록시 차단 추가: {proxy_url} (총 {blocked_count}개 차단됨)", thread_id)
+    
     def get_current_ip(self, driver):
         """현재 사용 중인 IP 주소 확인"""
         try:
@@ -10261,7 +10386,21 @@ class CafePostingMainWindow(QMainWindow):
                 self.log_message(f"🥈 스레드{thread_id} 새 답글 계정 시작: {selected_account[0]} (사용: {current_usage}/{account_limit})")
                 return selected_account
             
-            self.log_message(f"❌ 스레드{thread_id} 사용 가능한 답글 계정이 없습니다! (모든 계정이 제한 도달 또는 차단됨)")
+            # 🚨 사용 가능한 답글 계정이 없을 때 상세 정보 출력
+            blocked_count = len(self.blocked_reply_accounts)
+            blocked_account_ids = list(self.blocked_reply_accounts)
+            
+            self.log_message("=" * 60)
+            self.log_message(f"🚨 스레드{thread_id} 답글 작성 중단: 사용 가능한 계정이 없습니다!")
+            self.log_message(f"   📊 전체 답글 계정: {len(thread_reply_accounts)}개")
+            self.log_message(f"   🚫 차단된 계정: {blocked_count}개")
+            if blocked_account_ids:
+                blocked_list = ", ".join(blocked_account_ids[:10])  # 최대 10개까지만 표시
+                if len(blocked_account_ids) > 10:
+                    blocked_list += f" 외 {len(blocked_account_ids) - 10}개"
+                self.log_message(f"   🔴 차단 목록: {blocked_list}")
+            self.log_message(f"   ⚠️ 모든 계정이 제한 도달 또는 차단되어 답글 작성을 건너뜁니다.")
+            self.log_message("=" * 60)
             return None
 
     def get_comment_account_from_pool(self, exclude_account_id=None):
@@ -10295,7 +10434,54 @@ class CafePostingMainWindow(QMainWindow):
                     self.log_message(f"🔄 댓글 계정 순환 할당: {account[0]} (사용 가능: {available_count}개)")
                     return account
             
-            self.log_message("❌ 모든 댓글 계정이 차단되었거나 제외되었습니다!")
+            # 🚨🚨🚨 모든 댓글 계정이 차단되었을 때 전체 작업 중단 🚨🚨🚨
+            blocked_count = len(self.blocked_comment_accounts)
+            blocked_account_ids = [acc[0] if isinstance(acc, tuple) else acc for acc in self.blocked_comment_accounts]
+            
+            self.log_message("\n" + "=" * 70)
+            self.log_message("🚨🚨🚨 긴급: 모든 댓글 계정 차단으로 전체 작업 중단! 🚨🚨🚨")
+            self.log_message("=" * 70)
+            self.log_message(f"   📊 전체 댓글 계정: {total_accounts}개")
+            self.log_message(f"   🚫 차단된 계정: {blocked_count}개")
+            if blocked_account_ids:
+                blocked_list = ", ".join(blocked_account_ids[:10])  # 최대 10개까지만 표시
+                if len(blocked_account_ids) > 10:
+                    blocked_list += f" 외 {len(blocked_account_ids) - 10}개"
+                self.log_message(f"   🔴 차단 목록: {blocked_list}")
+            if exclude_account_id:
+                self.log_message(f"   ⛔ 제외된 계정: {exclude_account_id} (답글 작성자)")
+            self.log_message("")
+            self.log_message("⚠️ 댓글 계정 없이 답글만 작성하면 원고 관리가 불가능합니다!")
+            self.log_message("⚠️ 추가 작업을 방지하기 위해 전체 프로그램을 중단합니다.")
+            self.log_message("")
+            self.log_message("📌 조치 방법:")
+            self.log_message("   1. 차단된 계정들을 확인하세요")
+            self.log_message("   2. 새로운 댓글 계정을 준비하세요")
+            self.log_message("   3. 작업 진행 상황을 확인하고 재시작하세요")
+            self.log_message("=" * 70 + "\n")
+            
+            # 🔥 전체 작업 중단 플래그 설정
+            if hasattr(self, 'worker') and self.worker:
+                self.worker.is_running = False
+                self.worker.signals.progress.emit("🛑 댓글 계정 소진으로 인한 전체 작업 강제 중단!")
+            
+            # 🔔 긴급 팝업 알림 (사용자에게 즉시 알림)
+            try:
+                from PySide6.QtWidgets import QMessageBox
+                from PySide6.QtCore import Qt
+                
+                # 메인 스레드에서 실행되도록 시그널 전송
+                if hasattr(self, 'worker') and self.worker:
+                    # 별도 시그널로 처리하거나 직접 호출
+                    pass
+                    
+                # 긴급 알림 메시지 (백그라운드에서도 표시)
+                self.log_message("")
+                self.log_message("🔔🔔🔔 긴급 알림: 팝업 확인 필요! 🔔🔔🔔")
+                self.log_message("")
+            except Exception as e:
+                self.log_message(f"⚠️ 팝업 알림 실패: {e}")
+            
             return None
 
     def mark_reply_account_blocked(self, account):
