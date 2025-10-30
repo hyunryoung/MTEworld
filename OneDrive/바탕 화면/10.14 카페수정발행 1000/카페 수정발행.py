@@ -7,14 +7,22 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.2.6
+Version: 0.2.7
 Author: MTEworld
-Last Updated: 2025-10-22
+Last Updated: 2025-10-30
+
+[v0.2.7 업데이트 내역]
+- URL 추출 실패 시 프록시 변경 후 재시도 기능 추가 (최대 2회)
+- URL 추출 최종 실패 시 전체 수정/발행 프로세스 재시도 기능 추가
+- 무효한 URL 패턴 (/modify, /edit) 자동 차단
+- "작성자 본인만 할 수 있습니다" alert 자동 처리
+- 실패한 원고만 건너뛰고 다음 원고로 자동 진행
+- URL 추출 안정성 대폭 향상
 """
 
 # 🔢 버전 정보
-__version__ = "0.2.6"
-__build_date__ = "2025-10-22"
+__version__ = "0.2.7"
+__build_date__ = "2025-10-30"
 __author__ = "MTEworld"
 
 # 🔄 업데이트 관련 설정
@@ -1870,7 +1878,9 @@ class CafePostingWorker(QThread):
         invalid_patterns = [
             "ca-fe/cafes",  # 답글 작성 페이지 패턴
             "/reply",       # 답글 작성 중 표시
-            "iframe_url_utf8"  # iframe 파라미터
+            "iframe_url_utf8",  # iframe 파라미터
+            "/modify",      # 수정 페이지 (권한 문제 발생)
+            "/edit"         # 편집 페이지 (권한 문제 발생)
         ]
         
         for pattern in invalid_patterns:
@@ -2053,7 +2063,7 @@ class CafePostingWorker(QThread):
                 assigned_url=assigned_url, target_account=target_account
             )
             if not reply_url:
-                raise Exception("답글 작성 실패")
+                raise Exception("답글 작성 실패 - URL 추출 실패로 해당 원고 건너뜀")
             
             # 댓글 작성
             success_count, total_count = self.write_comments(thread_id, reply_url, parser, reply_account)
@@ -2213,7 +2223,7 @@ class CafePostingWorker(QThread):
         # 1단계: 답글 작성 및 답글 계정 저장
         reply_account, reply_url, reply_ip, current_row, next_reply_url = self.write_reply(thread_id, url, parser, script_folder, assigned_url=assigned_url, target_account=target_account)
         if not reply_url:
-            raise Exception("답글 작성 실패")
+            raise Exception("답글 작성 실패 - URL 추출 실패로 해당 원고 건너뜀")
         
         # 🔗 연쇄 시스템: 다음 작업을 위해 새로운 URL 저장
         if next_reply_url and next_reply_url != url:
@@ -3293,10 +3303,343 @@ class CafePostingWorker(QThread):
                 if url_attempt < max_url_attempts - 1:
                     self.smart_sleep(3, f"URL 추출 재시도 전 대기")
             
-            # 유효한 URL을 얻지 못한 경우 답글 작성 실패로 처리
+            # 유효한 URL을 얻지 못한 경우 프록시 변경 후 재시도
             if not valid_url_found or not reply_url:
-                self.emit_progress("❌ 유효한 답글 URL을 추출할 수 없습니다", thread_id)
-                reply_url = driver.current_url  # 최후 수단으로 현재 URL 사용
+                self.emit_progress("⚠️ 첫 시도에서 유효한 URL 추출 실패 - 프록시 변경 후 재시도 시작", thread_id)
+                
+                # 프록시 변경 후 재시도 (최대 2회)
+                max_proxy_retries = 2
+                original_driver = driver  # 원래 드라이버 백업
+                
+                for proxy_retry in range(max_proxy_retries):
+                    try:
+                        self.emit_progress(f"🔄 프록시 변경 재시도 {proxy_retry + 1}/{max_proxy_retries}", thread_id)
+                        
+                        # 현재 URL 저장 (나중에 다시 접속용)
+                        current_page_url = driver.current_url
+                        
+                        # 로그아웃
+                        self.logout_naver(driver)
+                        self.emit_progress("🚪 로그아웃 완료", thread_id)
+                        
+                        # 드라이버 종료
+                        try:
+                            driver.quit()
+                            self.emit_progress("🔌 기존 드라이버 종료", thread_id)
+                        except:
+                            pass
+                        
+                        # 새 프록시로 드라이버 생성
+                        self.emit_progress("🌐 새 프록시로 드라이버 생성 중...", thread_id)
+                        driver = self.get_driver(thread_id, 'reply', successful_account[0])
+                        if not driver:
+                            raise Exception("드라이버 생성 실패")
+                        
+                        self.emit_progress("✅ 새 드라이버 생성 완료", thread_id)
+                        
+                        # 재로그인
+                        self.emit_progress(f"🔑 재로그인 시도: {successful_account[0]}", thread_id)
+                        login_result = self.login_naver(driver, successful_account[0], successful_account[1], thread_id)
+                        if not login_result[0]:
+                            raise Exception(f"재로그인 실패: {login_result[1]}")
+                        
+                        self.emit_progress(f"✅ 재로그인 성공: {successful_account[0]}", thread_id)
+                        
+                        # 동일한 페이지로 이동
+                        self.emit_progress(f"📄 게시글 페이지 재접속: {current_page_url[:50]}...", thread_id)
+                        driver.get(current_page_url)
+                        self.smart_sleep(8, "페이지 로딩 대기")
+                        
+                        # iframe 진입 시도
+                        try:
+                            driver.switch_to.default_content()
+                            iframe = driver.find_element(By.CSS_SELECTOR, "iframe#cafe_main")
+                            driver.switch_to.frame(iframe)
+                            self.emit_progress("🔄 iframe 재진입 완료", thread_id)
+                        except:
+                            self.emit_progress("ℹ️ iframe 진입 불필요 또는 실패", thread_id)
+                        
+                        # URL 재추출 시도 (짧은 시도, 3회만)
+                        self.emit_progress("🔍 프록시 변경 후 URL 재추출 시도", thread_id)
+                        
+                        for retry_url_attempt in range(3):
+                            try:
+                                # #spiButton에서 data-url 추출
+                                def check_spi_button_retry(driver):
+                                    try:
+                                        return driver.execute_script("""
+                                            const spiButton = document.querySelector('#spiButton');
+                                            if (spiButton && spiButton.getAttribute('data-url')) {
+                                                return spiButton.getAttribute('data-url');
+                                            }
+                                            return null;
+                                        """)
+                                    except:
+                                        return None
+                                
+                                # 10초 동안 확인 (2초마다)
+                                retry_start = time.time()
+                                while time.time() - retry_start < 10:
+                                    candidate_url = check_spi_button_retry(driver)
+                                    if candidate_url and self.is_valid_reply_url(candidate_url):
+                                        reply_url = candidate_url
+                                        valid_url_found = True
+                                        self.emit_progress(f"✅ 프록시 변경 후 유효한 URL 추출 성공: {reply_url}", thread_id)
+                                        break
+                                    time.sleep(2)
+                                
+                                if valid_url_found:
+                                    break
+                                
+                                # 현재 URL 확인
+                                current_url = driver.current_url
+                                if self.is_valid_reply_url(current_url):
+                                    reply_url = current_url
+                                    valid_url_found = True
+                                    self.emit_progress(f"✅ 프록시 변경 후 현재 URL이 유효함: {reply_url}", thread_id)
+                                    break
+                                
+                            except Exception as url_retry_error:
+                                self.emit_progress(f"⚠️ URL 재추출 시도 {retry_url_attempt + 1} 실패: {str(url_retry_error)}", thread_id)
+                            
+                            if retry_url_attempt < 2:
+                                self.smart_sleep(2, "URL 재추출 재시도 전 대기")
+                        
+                        if valid_url_found:
+                            self.emit_progress(f"🎉 프록시 변경 재시도 {proxy_retry + 1}에서 URL 추출 성공!", thread_id)
+                            break
+                        else:
+                            raise Exception("URL 재추출 실패")
+                            
+                    except Exception as proxy_retry_error:
+                        self.emit_progress(f"❌ 프록시 재시도 {proxy_retry + 1}/{max_proxy_retries} 실패: {str(proxy_retry_error)}", thread_id)
+                        
+                        if proxy_retry == max_proxy_retries - 1:
+                            # 프록시 변경도 실패 → 최종 재시도: 원본 URL로 재접속 후 전체 수정/발행 프로세스 재시도
+                            self.emit_progress(f"❌ 프록시 변경 재시도 {max_proxy_retries}회 모두 실패", thread_id)
+                            self.emit_progress("🔄 최종 재시도: 원본 URL로 재접속 후 글 수정/발행 전체 재시도", thread_id)
+                            
+                            try:
+                                # 현재 드라이버가 있는지 확인
+                                if not driver:
+                                    # 드라이버가 없으면 새로 생성
+                                    driver = self.get_driver(thread_id, 'reply', successful_account[0])
+                                    if not driver:
+                                        raise Exception("최종 재시도용 드라이버 생성 실패")
+                                    
+                                    # 로그인
+                                    login_result = self.login_naver(driver, successful_account[0], successful_account[1], thread_id)
+                                    if not login_result[0]:
+                                        raise Exception(f"최종 재시도 로그인 실패: {login_result[1]}")
+                                
+                                # 원본 URL로 재접속 (edit_url은 함수 초반에 설정됨)
+                                self.emit_progress(f"📄 원본 URL 재접속: {edit_url[:50]}...", thread_id)
+                                driver.get(edit_url)
+                                self.smart_sleep(10, "원본 URL 재로딩 대기")
+                                
+                                # iframe 재진입
+                                try:
+                                    driver.switch_to.default_content()
+                                    iframe = driver.find_element(By.CSS_SELECTOR, "iframe#cafe_main")
+                                    driver.switch_to.frame(iframe)
+                                    self.emit_progress("🔄 iframe 재진입 완료", thread_id)
+                                except:
+                                    self.emit_progress("ℹ️ iframe 진입 불필요", thread_id)
+                                
+                                self.smart_sleep(5, "페이지 안정화 대기")
+                                
+                                # === 🔥 전체 수정/발행 프로세스 재시도 시작 ===
+                                self.emit_progress("🔧 수정 버튼 다시 찾기 시작", thread_id)
+                                
+                                # 수정 버튼 찾기
+                                action_btn = self.find_edit_button_with_scroll(driver, thread_id)
+                                if not action_btn:
+                                    raise Exception("최종 재시도: 수정 버튼을 찾을 수 없습니다")
+                                
+                                # 수정 버튼 클릭 & 새 탭 전환
+                                original_tabs = driver.window_handles
+                                if not self.safe_click_with_retry(driver, action_btn, element_name="수정 버튼"):
+                                    raise Exception("최종 재시도: 수정 버튼 클릭 실패")
+                                
+                                self.emit_progress("✅ 수정 버튼 클릭 완료", thread_id)
+                                
+                                # 새 탭 대기
+                                try:
+                                    from selenium.webdriver.support.ui import WebDriverWait as WDW
+                                    WDW(driver, 15).until(lambda d: len(d.window_handles) > len(original_tabs))
+                                    new_tab = list(set(driver.window_handles) - set(original_tabs))[0]
+                                    driver.switch_to.window(new_tab)
+                                    self.emit_progress("🆕 수정 작성 탭으로 전환 완료", thread_id)
+                                    self.smart_sleep(10, "새 탭 초기 로딩 대기")
+                                except Exception as tab_error:
+                                    raise Exception(f"최종 재시도: 새 탭 전환 실패: {str(tab_error)}")
+                                
+                                # 제목 재입력
+                                self.emit_progress("✏️ 제목 재입력 시작", thread_id)
+                                try:
+                                    title_input = self.wait_for_element_with_retry(
+                                        driver, By.CSS_SELECTOR, 'textarea[placeholder="제목을 입력해 주세요."]',
+                                        element_name="제목 입력 필드"
+                                    )
+                                    title_input.clear()
+                                    self.smart_sleep(1, "제목 지우기 후 대기")
+                                    if not self.safe_input_text(driver, title_input, parser.title, "제목"):
+                                        raise Exception("최종 재시도: 제목 입력 실패")
+                                    self.emit_progress("✅ 제목 재입력 완료", thread_id)
+                                except Exception as title_error:
+                                    raise Exception(f"최종 재시도: 제목 입력 실패: {str(title_error)}")
+                                
+                                # 에디터 로딩 대기
+                                self.emit_progress("⏳ 에디터 로딩 대기", thread_id)
+                                try:
+                                    self.wait_for_element_with_retry(
+                                        driver, By.CSS_SELECTOR, '[contenteditable="true"], div[role="textbox"], div[data-placeholder]',
+                                        max_wait=10, retry_count=5, element_name="에디터"
+                                    )
+                                    self.smart_sleep(3, "에디터 완전 로딩 대기")
+                                    self.emit_progress("✅ 에디터 로딩 완료", thread_id)
+                                except Exception as editor_error:
+                                    self.emit_progress(f"⚠️ 에디터 로딩 대기 실패: {editor_error}, 계속 진행", thread_id)
+                                
+                                # 본문 재입력
+                                self.emit_progress("📝 본문 재입력 시작", thread_id)
+                                success = self.clear_and_input_content(driver, parser.content, parser.image_paths)
+                                if not success:
+                                    raise Exception("최종 재시도: 본문 입력 실패")
+                                self.emit_progress("✅ 본문 재입력 완료", thread_id)
+                                
+                                # 등록 준비 대기
+                                self.smart_sleep(15, "본문 입력 완료 후 등록 준비 대기")
+                                
+                                # 공개 설정 확인
+                                self.check_and_set_public_visibility(driver, thread_id)
+                                
+                                # 등록 버튼 클릭
+                                self.emit_progress("📝 등록 버튼 클릭 시도", thread_id)
+                                submit_btn = self.wait_for_element_with_retry(
+                                    driver, By.CSS_SELECTOR, 'a.BaseButton--skinGreen[role="button"]',
+                                    element_name="등록 버튼"
+                                )
+                                if not self.safe_click_with_retry(driver, submit_btn, element_name="등록 버튼"):
+                                    raise Exception("최종 재시도: 등록 버튼 클릭 실패")
+                                
+                                self.emit_progress("✅ 등록 버튼 클릭 완료", thread_id)
+                                self.smart_sleep(10, "등록 완료 대기")
+                                
+                                # 등록 성공 확인 (작성 폼 사라짐 확인)
+                                try:
+                                    title_form = driver.find_element(By.CSS_SELECTOR, 'textarea[placeholder="제목을 입력해 주세요."]')
+                                    if title_form.is_displayed():
+                                        raise Exception("최종 재시도: 등록 실패 - 작성 폼이 아직 존재")
+                                except:
+                                    # 폼을 찾을 수 없음 = 등록 성공
+                                    self.emit_progress("✅ 등록 성공 확인 - 작성 폼 사라짐", thread_id)
+                                
+                                # 페이지 안정화 대기
+                                self.emit_progress("⏳ 등록 완료 후 페이지 안정화 대기", thread_id)
+                                self.smart_sleep(10, "등록 완료 후 안정화 대기")
+                                
+                                # === URL 재추출 시작 ===
+                                self.emit_progress("🔍 최종 재시도: URL 재추출 시작", thread_id)
+                                
+                                for final_attempt in range(5):
+                                    try:
+                                        # iframe 재진입
+                                        try:
+                                            driver.switch_to.default_content()
+                                            iframe = driver.find_element(By.CSS_SELECTOR, "iframe#cafe_main")
+                                            driver.switch_to.frame(iframe)
+                                        except:
+                                            pass
+                                        
+                                        # #spiButton에서 data-url 추출
+                                        def check_spi_final(driver):
+                                            try:
+                                                return driver.execute_script("""
+                                                    const spiButton = document.querySelector('#spiButton');
+                                                    if (spiButton && spiButton.getAttribute('data-url')) {
+                                                        return spiButton.getAttribute('data-url');
+                                                    }
+                                                    return null;
+                                                """)
+                                            except:
+                                                return None
+                                        
+                                        # 25초 동안 확인 (3초마다)
+                                        final_start = time.time()
+                                        while time.time() - final_start < 25:
+                                            candidate_url = check_spi_final(driver)
+                                            if candidate_url and self.is_valid_reply_url(candidate_url):
+                                                reply_url = candidate_url
+                                                valid_url_found = True
+                                                elapsed = round(time.time() - final_start, 1)
+                                                self.emit_progress(f"✅ 최종 재시도에서 URL 추출 성공 ({elapsed}초 소요): {reply_url}", thread_id)
+                                                break
+                                            time.sleep(3)
+                                        
+                                        if valid_url_found:
+                                            break
+                                        
+                                        # 현재 URL 확인
+                                        current_url = driver.current_url
+                                        if self.is_valid_reply_url(current_url):
+                                            reply_url = current_url
+                                            valid_url_found = True
+                                            self.emit_progress(f"✅ 최종 재시도에서 현재 URL이 유효함: {reply_url}", thread_id)
+                                            break
+                                        else:
+                                            self.emit_progress(f"❌ 현재 URL도 무효함: {current_url}", thread_id)
+                                        
+                                    except Exception as final_error:
+                                        self.emit_progress(f"⚠️ 최종 URL 추출 시도 {final_attempt + 1}/5 실패: {str(final_error)}", thread_id)
+                                    
+                                    if final_attempt < 4:
+                                        self.smart_sleep(3, "최종 URL 추출 재시도 전 대기")
+                                
+                                if valid_url_found:
+                                    self.emit_progress("🎉 최종 재시도에서 전체 프로세스 성공!", thread_id)
+                                else:
+                                    raise Exception("최종 재시도: 전체 프로세스 완료했으나 유효한 URL을 추출할 수 없습니다")
+                                    
+                            except Exception as final_retry_error:
+                                self.emit_progress(f"❌ 최종 재시도 실패: {str(final_retry_error)}", thread_id)
+                                if driver:
+                                    try:
+                                        driver.quit()
+                                    except:
+                                        pass
+                                # Exception을 raise하지 않고 실패 처리
+                                self.emit_progress(f"❌ 모든 재시도 실패 - 해당 원고 실패 처리 후 다음 원고로 넘어감", thread_id)
+                                valid_url_found = False
+                                reply_url = None
+                
+                # 여전히 실패한 경우 - 해당 원고만 실패 처리
+                if not valid_url_found or not reply_url:
+                    self.emit_progress("❌ 유효한 답글 URL을 추출할 수 없습니다 - 해당 원고 실패 처리", thread_id)
+                    
+                    # 결과 테이블에 실패 표시
+                    if hasattr(self, 'current_row') or 'current_row' in locals():
+                        try:
+                            update_data = {
+                                '답글아이디로그인아이피': '실패',
+                                '답글URL': 'URL 추출 실패',
+                                '댓글상황': '❌ URL 추출 실패'
+                            }
+                            self.main_window.update_result(current_row, update_data)
+                            self.emit_progress(f"📊 결과 테이블에 실패 표시됨 (행 {current_row+1})", thread_id)
+                        except:
+                            pass
+                    
+                    # 드라이버 정리
+                    try:
+                        if driver:
+                            self.logout_naver(driver)
+                            driver.quit()
+                    except:
+                        pass
+                    
+                    # 실패를 나타내는 값 반환 (예외를 던지지 않음)
+                    return None, None, None, None, None
             
             self.emit_progress(f"📝 최종 답글 URL 수집: {reply_url}", thread_id)
             
@@ -5595,9 +5938,10 @@ class CafePostingWorker(QThread):
                 alert_text = alert.text
                 self.signals.progress.emit(f"🔔 Alert 감지: {alert_text}")
                 
-                # 삭제된 게시글 관련 키워드 확인
+                # 삭제된 게시글 및 권한 문제 관련 키워드 확인
                 delete_keywords = ["삭제되었거나 없는 게시글", "삭제된 게시글", "존재하지 않는 게시글", 
-                                 "없는 게시글", "삭제되었습니다", "찾을 수 없습니다"]
+                                 "없는 게시글", "삭제되었습니다", "찾을 수 없습니다",
+                                 "작성자 본인만"]  # 권한 문제 (무효한 URL 접속)
                 
                 if any(keyword in alert_text for keyword in delete_keywords):
                     alert.accept()  # 확인 버튼 클릭
