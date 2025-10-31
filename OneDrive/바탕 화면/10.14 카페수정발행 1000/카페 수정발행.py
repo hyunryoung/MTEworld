@@ -7,9 +7,16 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.3.0
+Version: 0.3.1
 Author: MTEworld
 Last Updated: 2025-10-31
+
+[v0.3.1 업데이트 내역]
+- 🔥 활동정지 계정 건너뛰기 로직 완벽 수정 (row 번호 비교 개선)
+- 🔥 건너뛴 원고도 즉시 빨간색(실패) 표시
+- 🔥 preview 행 매칭 로직 개선 (4순위: account_id + is_preview)
+- 활동정지 감지 후 동일 계정의 모든 원고 완벽 처리
+- 결과 테이블 실시간 색상 업데이트 개선
 
 [v0.3.0 업데이트 내역]
 - 🔥 활동정지 Alert 감지 시 즉시 예외 발생 로직 개선
@@ -43,7 +50,7 @@ Last Updated: 2025-10-31
 """
 
 # 🔢 버전 정보
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __build_date__ = "2025-10-31"
 __author__ = "MTEworld"
 
@@ -1850,23 +1857,28 @@ class CafePostingWorker(QThread):
                             if len(remaining_task) == 4:  # ID 기준 task
                                 remaining_account_id, remaining_script_index, remaining_script_folder, remaining_assigned_url = remaining_task
                                 
+                                # row 번호 제거 후 비교 (gxstomach_row1 → gxstomach)
+                                remaining_real_account = remaining_account_id.split('_row')[0] if '_row' in remaining_account_id else remaining_account_id
+                                suspended_real_account = suspended_account.split('_row')[0] if '_row' in suspended_account else suspended_account
+                                
                                 # 동일한 계정인 경우 실패 처리
-                                if remaining_account_id == suspended_account:
+                                if remaining_real_account == suspended_real_account:
                                     cafe_name = getattr(self, 'current_cafe_name', '')
                                     
                                     result = {
                                         '답글아이디': remaining_account_id,
                                         '답글아이디로그인아이피': '활동정지',
-                                        '답글등록상태': '🚫 활동정지 (건너뜀)',
+                                        '답글등록상태': 'X',  # 실패로 표시 (빨간색)
                                         '폴더명': extract_keyword_from_folder_name(os.path.basename(remaining_script_folder)),
-                                        '답글URL': '활동정지',
+                                        '답글URL': '🚫 활동정지 (건너뜀)',
                                         '원본URL': remaining_assigned_url,
                                         '댓글상황': '작업 안함 (활동정지)',
                                         '댓글차단': '❌ 활동정지',
                                         'cafe_name': cafe_name,
                                         'script_folder': remaining_script_folder,
                                         'account_id': remaining_account_id,
-                                        'unique_key': generate_unique_key(remaining_assigned_url, remaining_script_folder, thread_id)
+                                        'unique_key': generate_unique_key(remaining_assigned_url, remaining_script_folder, thread_id),
+                                        'is_preview': False  # 🔥 실제 결과로 표시
                                     }
                                     self.signals.result_saved.emit(result)
                                     self.save_result_immediately(result)
@@ -2180,9 +2192,9 @@ class CafePostingWorker(QThread):
                 result = {
                     '답글아이디': account_id,
                     '답글아이디로그인아이피': '활동정지',
-                    '답글등록상태': '🚫 활동정지',
+                    '답글등록상태': 'X',  # 실패로 표시 (빨간색)
                     '폴더명': extract_keyword_from_folder_name(os.path.basename(script_folder)),
-                    '답글URL': '활동정지',
+                    '답글URL': '🚫 활동정지',
                     '원본URL': assigned_url,
                     '댓글상황': '작업 안함 (활동정지)',
                     '댓글차단': '❌ 활동정지',
@@ -10035,6 +10047,7 @@ class CafePostingMainWindow(QMainWindow):
             
             # 📌 성공/실패에 따른 색상 변경
             is_failure = (update_data.get('답글아이디로그인아이피') == '실패' or 
+                         update_data.get('답글아이디로그인아이피') == '활동정지' or
                          '오류:' in str(update_data.get('답글URL', '')))
             
             # 📌 댓글 완료 여부 확인 (더 진한 초록색)
@@ -10104,6 +10117,7 @@ class CafePostingMainWindow(QMainWindow):
             self.results[existing_row] = result
             self.update_table_row(existing_row, result)
             self.log_message(f"📝 작업 행 업데이트: {result.get('원본URL', 'Unknown')} - {result.get('답글아이디', 'Unknown')}")
+            row_to_color = existing_row
         else:
             # 새 행 추가 (기존 방식)
             self.results.append(result)
@@ -10112,6 +10126,19 @@ class CafePostingMainWindow(QMainWindow):
             self.result_table.insertRow(row)
             self.update_table_row(row, result)
             self.log_message(f"📝 새 작업 행 추가: {result.get('원본URL', 'Unknown')} - {result.get('답글아이디', 'Unknown')}")
+            row_to_color = row
+        
+        # 🔥 색상 설정 (실패/활동정지는 빨간색)
+        is_failure = (result.get('답글아이디로그인아이피') == '실패' or 
+                     result.get('답글아이디로그인아이피') == '활동정지' or
+                     result.get('답글등록상태') == 'X' or
+                     '오류:' in str(result.get('답글URL', '')))
+        
+        if is_failure:
+            for col in range(8):
+                item = self.result_table.item(row_to_color, col)
+                if item:
+                    item.setBackground(QColor(255, 200, 200))  # 연한 빨간색
         
         # 🆕 아이디 관리 통계 업데이트
         self.update_account_stats_from_result(result)
@@ -10148,6 +10175,13 @@ class CafePostingMainWindow(QMainWindow):
                         existing_result.get('답글아이디', '') in ['⏳ 대기중', '작업 중...', '']):  # 아직 아이디가 할당되지 않은 상태
                         self.log_message(f"⏳ 대기중 행 매칭: {os.path.basename(target_script_folder) if target_script_folder else 'None'}")
                         return i
+            
+            # 🔥 4순위: account_id로 직접 매칭 (활동정지 건너뛴 preview 행)
+            for i, existing_result in enumerate(self.results):
+                if (existing_result.get('account_id', '') == target_account_id and
+                    existing_result.get('is_preview', False)):  # preview 행만
+                    self.log_message(f"🎯 account_id 매칭 성공: {target_account_id} (preview 행)")
+                    return i
             
             self.log_message(f"❌ 매칭 실패 - 새 행 생성: {target_account_id}")
             return None
