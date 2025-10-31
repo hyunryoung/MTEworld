@@ -7,9 +7,16 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.2.7
+Version: 0.2.8
 Author: MTEworld
-Last Updated: 2025-10-30
+Last Updated: 2025-10-31
+
+[v0.2.8 업데이트 내역]
+- 🔥 카페 활동정지 팝업 자동 감지 및 처리 기능 추가
+- 🔥 활동정지 계정 감지 시 해당 계정의 모든 원고 자동 실패 처리
+- 🔥 활동정지 계정을 차단 목록에 자동 추가
+- 🔥 활동정지 계정 건너뛰고 다음 계정 작업으로 자동 진행
+- 원고 관리 효율성 향상 (활동정지 계정으로 불필요한 재시도 방지)
 
 [v0.2.7 업데이트 내역]
 - URL 추출 실패 시 프록시 변경 후 재시도 기능 추가 (최대 2회)
@@ -21,8 +28,8 @@ Last Updated: 2025-10-30
 """
 
 # 🔢 버전 정보
-__version__ = "0.2.7"
-__build_date__ = "2025-10-30"
+__version__ = "0.2.8"
+__build_date__ = "2025-10-31"
 __author__ = "MTEworld"
 
 # 🔄 업데이트 관련 설정
@@ -1814,7 +1821,52 @@ class CafePostingWorker(QThread):
                             pass
                     
                 except Exception as e:
-                    self.emit_progress(f"❌ 작업 실패: {task_name} - {str(e)}", thread_id)
+                    error_message = str(e)
+                    
+                    # 🔥 활동정지 예외 처리 - 해당 계정의 모든 원고 건너뛰기
+                    if "ACCOUNT_SUSPENDED" in error_message:
+                        suspended_account = error_message.split(":")[-1]
+                        self.emit_progress(f"", thread_id)
+                        self.emit_progress(f"🚫 활동정지 계정: {suspended_account} - 해당 계정의 남은 모든 원고를 건너뜁니다", thread_id)
+                        
+                        # 🔥 해당 계정으로 매핑된 나머지 원고들을 모두 실패 처리
+                        remaining_tasks = task_list[task_idx+1:]  # 현재 작업 이후의 모든 작업
+                        for remaining_task in remaining_tasks:
+                            if len(remaining_task) == 4:  # ID 기준 task
+                                remaining_account_id, remaining_script_index, remaining_script_folder, remaining_assigned_url = remaining_task
+                                
+                                # 동일한 계정인 경우 실패 처리
+                                if remaining_account_id == suspended_account:
+                                    cafe_name = getattr(self, 'current_cafe_name', '')
+                                    
+                                    result = {
+                                        '답글아이디': remaining_account_id,
+                                        '답글아이디로그인아이피': '활동정지',
+                                        '답글등록상태': '🚫 활동정지 (건너뜀)',
+                                        '폴더명': extract_keyword_from_folder_name(os.path.basename(remaining_script_folder)),
+                                        '답글URL': '활동정지',
+                                        '원본URL': remaining_assigned_url,
+                                        '댓글상황': '작업 안함 (활동정지)',
+                                        '댓글차단': '❌ 활동정지',
+                                        'cafe_name': cafe_name,
+                                        'script_folder': remaining_script_folder,
+                                        'account_id': remaining_account_id,
+                                        'unique_key': generate_unique_key(remaining_assigned_url, remaining_script_folder, thread_id)
+                                    }
+                                    self.signals.result_saved.emit(result)
+                                    self.save_result_immediately(result)
+                                    
+                                    # 작업 완료로 표시 (재시도 방지)
+                                    unique_task_key = f"{remaining_account_id}_{remaining_script_folder}_{remaining_assigned_url}"
+                                    temp_url_index = hash(unique_task_key) % 10000000
+                                    self.progress.mark_task_completed(temp_url_index, remaining_script_index)
+                        
+                        self.emit_progress(f"✅ {suspended_account} 계정의 모든 원고 실패 처리 완료 - 다음 계정으로 진행", thread_id)
+                        self.emit_progress(f"", thread_id)
+                    else:
+                        # 일반 오류는 로그만 출력하고 다음 작업 계속
+                        self.emit_progress(f"❌ 작업 실패: {task_name} - {error_message}", thread_id)
+                    
                     continue
                     
             else:  # 기존 URL 기준: (url_index, reply_index)
@@ -2099,7 +2151,43 @@ class CafePostingWorker(QThread):
             self.safe_cleanup_thread_drivers(thread_id)
             
         except Exception as e:
-            self.emit_progress(f"❌ 작업 실패: {account_id}-원고{script_index+1} - {str(e)}", thread_id)
+            error_message = str(e)
+            
+            # 🔥 활동정지 예외 처리
+            if "ACCOUNT_SUSPENDED" in error_message:
+                suspended_account = error_message.split(":")[-1]
+                self.emit_progress(f"", thread_id)
+                self.emit_progress(f"🚫🚫🚫 활동정지 계정 감지: {suspended_account}", thread_id)
+                self.emit_progress(f"   ⚠️ 해당 계정으로 매핑된 모든 원고를 실패 처리하고 건너뜁니다", thread_id)
+                self.emit_progress(f"", thread_id)
+                
+                # 활동정지 결과 저장
+                result = {
+                    '답글아이디': account_id,
+                    '답글아이디로그인아이피': '활동정지',
+                    '답글등록상태': '🚫 활동정지',
+                    '폴더명': extract_keyword_from_folder_name(os.path.basename(script_folder)),
+                    '답글URL': '활동정지',
+                    '원본URL': assigned_url,
+                    '댓글상황': '작업 안함 (활동정지)',
+                    '댓글차단': '❌ 활동정지',
+                    'cafe_name': cafe_name,
+                    'script_folder': script_folder,
+                    'account_id': account_id,
+                    'unique_key': generate_unique_key(assigned_url, script_folder, thread_id)
+                }
+                self.signals.result_saved.emit(result)
+                self.save_result_immediately(result)
+                
+                # 드라이버 정리
+                self.emit_progress(f"🧹 [스레드{thread_id+1}] 활동정지 계정 - 전체 드라이버 정리", thread_id)
+                self.safe_cleanup_thread_drivers(thread_id)
+                
+                # 🔥 ACCOUNT_SUSPENDED 예외를 상위로 전달하여 해당 계정의 모든 작업 건너뛰기
+                raise Exception(f"ACCOUNT_SUSPENDED:{suspended_account}")
+            
+            # 일반 오류 처리
+            self.emit_progress(f"❌ 작업 실패: {account_id}-원고{script_index+1} - {error_message}", thread_id)
             # 실패 결과 저장
             result = {
                 '답글아이디': account_id,
@@ -2991,6 +3079,18 @@ class CafePostingWorker(QThread):
             original_tabs = driver.window_handles
             if not self.safe_click_with_retry(driver, action_btn, element_name=f"{action_name} 버튼"):
                 raise Exception(f"{action_name} 버튼 클릭 실패")
+            
+            # 🔥 버튼 클릭 직후 활동정지 팝업 체크 (수정 모드일 때만)
+            if action_name == "수정":
+                self.emit_progress(f"🔍 {action_name} 버튼 클릭 후 활동정지 팝업 체크...", thread_id)
+                time.sleep(2)  # 팝업이 나타날 시간 대기
+                try:
+                    self.handle_activity_suspension_popup(driver, thread_id, successful_account[0])
+                except Exception as suspension_error:
+                    if "ACCOUNT_SUSPENDED" in str(suspension_error):
+                        # 활동정지 감지됨 - 예외를 상위로 전달
+                        raise suspension_error
+                    # 다른 오류는 무시하고 계속 진행
             
             # 새 탭 열릴 때까지 대기
             try:
@@ -5980,6 +6080,51 @@ class CafePostingWorker(QThread):
             
         except Exception as e:
             self.signals.progress.emit(f"⚠️ 삭제된 게시글 팝업 처리 중 오류: {str(e)}")
+            return False
+
+    def handle_activity_suspension_popup(self, driver, thread_id, account_id):
+        """활동정지 팝업 감지 및 처리 - 계정 차단 후 특별 예외 발생"""
+        try:
+            self.emit_progress("🔍 활동정지 팝업 확인 중...", thread_id)
+            
+            # JavaScript alert 처리
+            try:
+                alert = driver.switch_to.alert
+                alert_text = alert.text
+                self.emit_progress(f"🔔 Alert 감지: {alert_text[:50]}...", thread_id)
+                
+                # 활동정지 관련 키워드 확인
+                suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가"]
+                
+                if any(keyword in alert_text for keyword in suspension_keywords):
+                    self.emit_progress(f"🚫 활동정지 팝업 감지됨!", thread_id)
+                    self.emit_progress(f"   계정: {account_id}", thread_id)
+                    self.emit_progress(f"   메시지: {alert_text[:100]}", thread_id)
+                    
+                    alert.accept()  # 확인 버튼 클릭
+                    self.emit_progress("✅ 활동정지 Alert 확인 완료", thread_id)
+                    time.sleep(1)
+                    
+                    # 🔥 해당 계정을 차단 목록에 추가
+                    self.main_window.mark_reply_account_blocked(account_id)
+                    self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (활동정지)", thread_id)
+                    
+                    # 🔥 특별한 예외 발생 (상위에서 감지해서 해당 계정의 모든 작업 건너뜀)
+                    raise Exception(f"ACCOUNT_SUSPENDED:{account_id}")
+                    
+            except Exception as e:
+                # alert 관련 예외는 다시 발생
+                if "ACCOUNT_SUSPENDED" in str(e):
+                    raise e
+                # alert가 없는 경우는 False 반환
+                return False
+            
+            return False
+            
+        except Exception as e:
+            if "ACCOUNT_SUSPENDED" in str(e):
+                raise e  # 활동정지 예외는 상위로 전달
+            self.emit_progress(f"⚠️ 활동정지 팝업 처리 중 오류: {str(e)}", thread_id)
             return False
 
     def handle_title_popup(self, driver):
