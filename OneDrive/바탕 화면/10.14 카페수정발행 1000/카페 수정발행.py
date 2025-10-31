@@ -7,33 +7,30 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.3.1
+Version: 0.3.0
 Author: MTEworld
 Last Updated: 2025-10-31
 
-[v0.3.1 업데이트 내역]
-- 🔥 활동정지 Alert 감지 재시도 로직 추가: 최대 5회 재시도 (총 5초)
-- 🔥 Alert 감지 로그 상세화: 시도 횟수 및 메시지 전체 출력
-- 🔥 다른 Alert 자동 처리: 활동정지 아닌 Alert는 수락 후 계속 진행
-- 활동정지 감지 안정성 극대화
-
 [v0.3.0 업데이트 내역]
-- 🔥 활동정지 Alert 감지 타이밍 최적화: 새 탭 전환 직후 즉시 체크
-- 🔥 페이지 로딩 블록 문제 해결: 로딩 대기 전에 alert 먼저 처리
-- 활동정지 감지 성공률 100% 달성
-- 안정성 및 성능 대폭 향상
+- 🔥 활동정지 Alert 감지 시 즉시 예외 발생 로직 개선
+- 🔥 활동정지 감지 후 무한 체크 루프 문제 해결
+- 🔥 account_suspended 플래그 방식으로 안정성 향상
+- 🔥 계정 차단 목록 타입 오류 수정 (list → set)
+- 활동정지 계정의 남은 모든 원고 자동 실패 처리
+- 작업 흐름 안정성 대폭 개선
 
 [v0.2.9 업데이트 내역]
-- 🔥 활동정지 팝업 감지 개선: 새 창/탭에서 뜨는 팝업 정확히 감지
-- 🔥 활동정지 체크 타이밍 수정: 새 탭 로딩 완료 후 체크
-- 🔥 3가지 팝업 형식 지원: 새 창, 모달, JavaScript Alert
-- 활동정지 감지 안정성 대폭 향상
+- 🔥 URL 진입 직후 활동정지 팝업 감지 강화 (3단계 체크)
+- 🔥 활동정지 키워드 확장 ("글쓰기", "수정" 등 추가)
+- 🔥 팝업 감지 타이밍 최적화 (즉시 → 2초 → 5초 대기)
+- URL 접속 시 활동정지 계정 즉시 차단 및 실패 처리
+- 활동정지 감지율 대폭 향상
 
 [v0.2.8 업데이트 내역]
-- 🔥 카페 활동정지 팝업 자동 감지 및 처리 기능 추가
-- 🔥 활동정지 계정 감지 시 해당 계정의 모든 원고 자동 실패 처리
-- 🔥 활동정지 계정을 차단 목록에 자동 추가
-- 🔥 활동정지 계정 건너뛰고 다음 계정 작업으로 자동 진행
+- 카페 활동정지 팝업 자동 감지 및 처리 기능 추가
+- 활동정지 계정 감지 시 해당 계정의 모든 원고 자동 실패 처리
+- 활동정지 계정을 차단 목록에 자동 추가
+- 활동정지 계정 건너뛰고 다음 계정 작업으로 자동 진행
 - 원고 관리 효율성 향상 (활동정지 계정으로 불필요한 재시도 방지)
 
 [v0.2.7 업데이트 내역]
@@ -46,7 +43,7 @@ Last Updated: 2025-10-31
 """
 
 # 🔢 버전 정보
-__version__ = "0.3.1"
+__version__ = "0.3.0"
 __build_date__ = "2025-10-31"
 __author__ = "MTEworld"
 
@@ -3053,11 +3050,11 @@ class CafePostingWorker(QThread):
                 self.emit_progress(f"📝 게시글 페이지로 이동: {url}", thread_id)
             
             driver.get(edit_url)
-            
+
             # 페이지 로딩 완료 대기
             if not self.wait_for_page_load(driver):
                 self.emit_progress("⚠️ 페이지 로딩 시간 초과, 계속 진행합니다...", thread_id)
-            
+
             self.smart_sleep(10, "페이지 로딩 후 대기")
             
             # iframe 진입
@@ -3095,73 +3092,114 @@ class CafePostingWorker(QThread):
             
             # 버튼 클릭
             original_tabs = driver.window_handles
+            self.emit_progress(f"🔍 [DEBUG] 클릭 전 탭 수: {len(original_tabs)}", thread_id)
+            self.emit_progress(f"🔍 [DEBUG] 클릭 전 현재 URL: {driver.current_url[:50]}...", thread_id)
+
             if not self.safe_click_with_retry(driver, action_btn, element_name=f"{action_name} 버튼"):
                 raise Exception(f"{action_name} 버튼 클릭 실패")
-            
-            # 새 탭 열릴 때까지 대기
-            try:
+
+            self.emit_progress(f"✅ {action_name} 버튼 클릭 완료", thread_id)
+
+            # 🔥 수정 모드일 때: 새 탭으로 빠르게 전환 후 Alert 체크
+            new_tab_handle = None
+            if action_name == "수정":
+                self.emit_progress(f"🔍 [활동정지] 새 탭 빠른 전환 시도...", thread_id)
                 from selenium.webdriver.support.ui import WebDriverWait as WDW
-                WDW(driver, 15).until(
-                    lambda d: len(d.window_handles) > len(original_tabs)
-                )
-                new_tab = list(set(driver.window_handles) - set(original_tabs))[0]
-                driver.switch_to.window(new_tab)
-                self.emit_progress(f"🆕 {action_name} 작성 탭으로 전환 완료", thread_id)
-                
-                # 🔥 새 탭 전환 직후 즉시 활동정지 팝업 체크 (수정 모드일 때만)
-                # Alert가 떠있으면 페이지 로딩이 블록되므로 로딩 대기 전에 먼저 체크!
-                if action_name == "수정":
-                    self.emit_progress(f"🔍 새 탭 전환 직후 활동정지 alert 체크...", thread_id)
+                from selenium.webdriver.support import expected_conditions as EC
+
+                # 새 탭이 열릴 때까지 짧게 대기 (최대 3초)
+                max_wait = 3
+                start_time = time.time()
+                while time.time() - start_time < max_wait:
+                    try:
+                        current_handles = driver.window_handles
+                        if len(current_handles) > len(original_tabs):
+                            new_tab_handle = list(set(current_handles) - set(original_tabs))[0]
+                            self.emit_progress(f"✅ 새 탭 감지! 즉시 전환...", thread_id)
+                            driver.switch_to.window(new_tab_handle)
+                            break
+                    except:
+                        pass
+                    time.sleep(0.1)
+
+                # 새 탭으로 전환됐으면 Alert 체크
+                if new_tab_handle:
+                    self.emit_progress(f"🔍 [활동정지] 새 탭에서 Alert 체크...", thread_id)
+                    time.sleep(0.5)  # Alert 대기
+
+                    alert_detected = False
+                    account_suspended = False  # 활동정지 플래그
                     
-                    # 🔥 여러 번 재시도 (alert가 나타날 시간을 주기 위해)
-                    alert_found = False
-                    for alert_attempt in range(5):  # 최대 5번 시도 (총 5초)
+                    for i in range(20):  # 최대 10초
                         try:
-                            time.sleep(1)  # 1초씩 대기
                             alert = driver.switch_to.alert
                             alert_text = alert.text
-                            alert_found = True
-                            self.emit_progress(f"🔔 Alert 감지 (시도 {alert_attempt+1}/5): {alert_text[:80]}...", thread_id)
-                            
+                            alert_detected = True
+
+                            self.emit_progress(f"🔔 [활동정지] Alert 감지! 내용: {alert_text}", thread_id)
+
                             # 활동정지 관련 키워드 확인
-                            suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가"]
-                            
+                            suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "글쓰기", "수정", "카페 활동이 불가", "현재 활동정지"]
+
                             if any(keyword in alert_text for keyword in suspension_keywords):
                                 self.emit_progress(f"", thread_id)
                                 self.emit_progress(f"🚫🚫🚫 활동정지 Alert 감지됨!", thread_id)
                                 self.emit_progress(f"   계정: {successful_account[0]}", thread_id)
                                 self.emit_progress(f"   메시지: {alert_text}", thread_id)
                                 self.emit_progress(f"", thread_id)
-                                
-                                alert.accept()  # 확인 버튼 클릭
+
+                                alert.accept()
                                 self.emit_progress("✅ 활동정지 Alert 확인 완료", thread_id)
                                 time.sleep(1)
-                                
+
                                 # 🔥 해당 계정을 차단 목록에 추가
-                                self.main_window.mark_reply_account_blocked(successful_account[0])
-                                self.emit_progress(f"🚫 {successful_account[0]} 계정 차단 목록 추가 (활동정지)", thread_id)
-                                
-                                # 🔥 특별한 예외 발생
-                                raise Exception(f"ACCOUNT_SUSPENDED:{successful_account[0]}")
+                                try:
+                                    self.main_window.mark_reply_account_blocked(successful_account[0])
+                                    self.emit_progress(f"🚫 {successful_account[0]} 계정 차단 목록 추가 (활동정지)", thread_id)
+                                except Exception as mark_error:
+                                    self.emit_progress(f"⚠️ 계정 차단 추가 실패: {str(mark_error)[:50]} - 계속 진행", thread_id)
+
+                                # 🔥 플래그 설정하고 루프 종료
+                                account_suspended = True
+                                self.emit_progress(f"🔥 [DEBUG] account_suspended = True 설정됨!", thread_id)
+                                break  # for loop 즉시 종료
                             else:
-                                # 다른 alert는 그냥 수락하고 계속 진행
-                                self.emit_progress(f"ℹ️ 다른 Alert 감지: {alert_text[:50]}", thread_id)
+                                # 다른 alert는 수락하고 계속 진행
+                                self.emit_progress(f"ℹ️ [활동정지] 다른 Alert: {alert_text[:50]}", thread_id)
                                 alert.accept()
                                 time.sleep(1)
-                            break  # alert 처리 완료
-                            
-                        except Exception as no_alert:
-                            # NoAlertPresentException - alert가 아직 없음
-                            if "ACCOUNT_SUSPENDED" in str(no_alert):
-                                raise no_alert  # 활동정지 예외는 즉시 상위로 전달
-                            # 아직 alert가 없으면 다음 시도로 계속
-                            if alert_attempt < 4:
-                                self.emit_progress(f"⏳ Alert 대기 중... (시도 {alert_attempt+1}/5)", thread_id)
-                            continue
+                                break  # 다른 Alert도 break
+                        except Exception as e:
+                            # Alert 없음 - 계속 체크
+                            if i % 4 == 0:
+                                self.emit_progress(f"⏳ [활동정지] Alert 체크 중... ({i+1}/20)", thread_id)
+
+                        time.sleep(0.5)
+
+                    # 🔥 활동정지 감지됐으면 즉시 예외 발생 (for loop 밖에서)
+                    if account_suspended:
+                        self.emit_progress(f"🔥 [활동정지] 작업 완전 중단 - 예외 발생!", thread_id)
+                        raise Exception(f"ACCOUNT_SUSPENDED:{successful_account[0]}")
                     
-                    if not alert_found:
-                        self.emit_progress("✅ 활동정지 alert 없음 - 정상 진행", thread_id)
-                
+                    if alert_detected:
+                        self.emit_progress(f"✅ [활동정지] Alert 처리 완료", thread_id)
+
+            # 새 탭 열릴 때까지 대기
+            try:
+                from selenium.webdriver.support.ui import WebDriverWait as WDW
+                from selenium.webdriver.support import expected_conditions as EC
+
+                self.emit_progress(f"⏳ 새 탭 열림 대기 중...", thread_id)
+                WDW(driver, 15).until(
+                    lambda d: len(d.window_handles) > len(original_tabs)
+                )
+
+                new_tab = list(set(driver.window_handles) - set(original_tabs))[0]
+                self.emit_progress(f"✅ 새 탭 감지됨! 전환 중...", thread_id)
+
+                driver.switch_to.window(new_tab)
+                self.emit_progress(f"🆕 {action_name} 작성 탭으로 전환 완료", thread_id)
+
                 # 새 탭에서 페이지 로딩 완료까지 충분히 대기
                 self.smart_sleep(10, "새 탭 초기 로딩 대기")
                 
@@ -3185,9 +3223,6 @@ class CafePostingWorker(QThread):
                     self.emit_progress("⚠️ 새 탭 상호작용 준비 실패", thread_id)
                     
             except Exception as e:
-                # 🔥 활동정지 예외는 상위로 전달
-                if "ACCOUNT_SUSPENDED" in str(e):
-                    raise e
                 self.emit_progress(f"ℹ️ 새 탭 감지 실패 또는 새 탭이 열리지 않음: {e}", thread_id)
 
             # 작성 페이지는 단일 페이지 구조이므로 iframe 전환 불필요
@@ -6150,112 +6185,7 @@ class CafePostingWorker(QThread):
         try:
             self.emit_progress("🔍 활동정지 팝업 확인 중...", thread_id)
             
-            # 1️⃣ 새 창/탭으로 뜨는 팝업 확인
-            try:
-                current_windows = driver.window_handles
-                if len(current_windows) > 1:
-                    # 새 창이 있으면 전환해서 확인
-                    for window in current_windows:
-                        driver.switch_to.window(window)
-                        page_text = driver.page_source
-                        
-                        # 활동정지 관련 키워드 확인
-                        suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가", 
-                                             "해제되기 전까지", "MY구독"]
-                        
-                        if any(keyword in page_text for keyword in suspension_keywords):
-                            self.emit_progress(f"🚫 활동정지 팝업 감지됨! (새 창)", thread_id)
-                            self.emit_progress(f"   계정: {account_id}", thread_id)
-                            
-                            # 확인 버튼 찾아서 클릭 (여러 선택자 시도)
-                            try:
-                                for selector in ['button', 'a.button', 'input[type="button"]', 
-                                               'a[role="button"]', '.btn', '.button']:
-                                    try:
-                                        confirm_btn = driver.find_element(By.CSS_SELECTOR, selector)
-                                        if confirm_btn and confirm_btn.is_displayed():
-                                            confirm_btn.click()
-                                            self.emit_progress("✅ 활동정지 팝업 확인 버튼 클릭", thread_id)
-                                            break
-                                    except:
-                                        continue
-                            except:
-                                pass
-                            
-                            # 팝업 창 닫기
-                            driver.close()
-                            # 원래 창으로 복귀
-                            driver.switch_to.window(current_windows[0])
-                            time.sleep(1)
-                            
-                            # 🔥 해당 계정을 차단 목록에 추가
-                            self.main_window.mark_reply_account_blocked(account_id)
-                            self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (활동정지)", thread_id)
-                            
-                            # 🔥 특별한 예외 발생
-                            raise Exception(f"ACCOUNT_SUSPENDED:{account_id}")
-            except Exception as e:
-                if "ACCOUNT_SUSPENDED" in str(e):
-                    raise e
-            
-            # 2️⃣ 페이지 내 모달 팝업 확인
-            try:
-                # 활동정지 관련 텍스트가 있는 요소 찾기
-                suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가"]
-                
-                # 다양한 팝업 선택자 시도
-                modal_selectors = [
-                    'div[role="dialog"]',
-                    'div.modal',
-                    'div.popup',
-                    'div.layer_popup',
-                    'div.alert',
-                    'div[class*="popup"]',
-                    'div[class*="modal"]',
-                    'div[class*="alert"]'
-                ]
-                
-                for selector in modal_selectors:
-                    try:
-                        modals = driver.find_elements(By.CSS_SELECTOR, selector)
-                        for modal in modals:
-                            if modal.is_displayed():
-                                modal_text = modal.text
-                                
-                                if any(keyword in modal_text for keyword in suspension_keywords):
-                                    self.emit_progress(f"🚫 활동정지 팝업 감지됨! (모달)", thread_id)
-                                    self.emit_progress(f"   계정: {account_id}", thread_id)
-                                    self.emit_progress(f"   메시지: {modal_text[:100]}", thread_id)
-                                    
-                                    # 확인 버튼 찾아서 클릭
-                                    try:
-                                        confirm_buttons = modal.find_elements(By.CSS_SELECTOR, 
-                                            'button, a.button, input[type="button"], a[role="button"]')
-                                        for btn in confirm_buttons:
-                                            if btn.is_displayed() and ('확인' in btn.text or 'OK' in btn.text.upper()):
-                                                btn.click()
-                                                self.emit_progress("✅ 활동정지 모달 확인 버튼 클릭", thread_id)
-                                                break
-                                    except:
-                                        pass
-                                    
-                                    time.sleep(1)
-                                    
-                                    # 🔥 해당 계정을 차단 목록에 추가
-                                    self.main_window.mark_reply_account_blocked(account_id)
-                                    self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (활동정지)", thread_id)
-                                    
-                                    # 🔥 특별한 예외 발생
-                                    raise Exception(f"ACCOUNT_SUSPENDED:{account_id}")
-                    except Exception as e:
-                        if "ACCOUNT_SUSPENDED" in str(e):
-                            raise e
-                        continue
-            except Exception as e:
-                if "ACCOUNT_SUSPENDED" in str(e):
-                    raise e
-            
-            # 3️⃣ JavaScript alert 처리 (기존 방식)
+            # JavaScript alert 처리
             try:
                 alert = driver.switch_to.alert
                 alert_text = alert.text
@@ -6265,7 +6195,7 @@ class CafePostingWorker(QThread):
                 suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가"]
                 
                 if any(keyword in alert_text for keyword in suspension_keywords):
-                    self.emit_progress(f"🚫 활동정지 팝업 감지됨! (JS Alert)", thread_id)
+                    self.emit_progress(f"🚫 활동정지 팝업 감지됨!", thread_id)
                     self.emit_progress(f"   계정: {account_id}", thread_id)
                     self.emit_progress(f"   메시지: {alert_text[:100]}", thread_id)
                     
@@ -6277,12 +6207,15 @@ class CafePostingWorker(QThread):
                     self.main_window.mark_reply_account_blocked(account_id)
                     self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (활동정지)", thread_id)
                     
-                    # 🔥 특별한 예외 발생
+                    # 🔥 특별한 예외 발생 (상위에서 감지해서 해당 계정의 모든 작업 건너뜀)
                     raise Exception(f"ACCOUNT_SUSPENDED:{account_id}")
                     
             except Exception as e:
+                # alert 관련 예외는 다시 발생
                 if "ACCOUNT_SUSPENDED" in str(e):
                     raise e
+                # alert가 없는 경우는 False 반환
+                return False
             
             return False
             
@@ -9393,12 +9326,12 @@ class CafePostingMainWindow(QMainWindow):
             with self.reply_pool_lock:
                 # 🚨 완전 분리: 현재 카페 계정만 사용
                 self.available_reply_accounts = cafe_reply_accounts
-                self.blocked_reply_accounts = []
+                self.blocked_reply_accounts = set()  # list → set 수정
                 
             with self.comment_pool_lock:
                 # 🚨 완전 분리: 현재 카페 계정만 사용
                 self.available_comment_accounts = cafe_comment_accounts
-                self.blocked_comment_accounts = []
+                self.blocked_comment_accounts = set()  # list → set 수정
             
             # 계정 사용 횟수 초기화
             self.reset_account_usage()
