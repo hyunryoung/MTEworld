@@ -7,9 +7,15 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.3.0
+Version: 0.3.1
 Author: MTEworld
 Last Updated: 2025-10-31
+
+[v0.3.1 업데이트 내역]
+- 🔥 활동정지 Alert 감지 재시도 로직 추가: 최대 5회 재시도 (총 5초)
+- 🔥 Alert 감지 로그 상세화: 시도 횟수 및 메시지 전체 출력
+- 🔥 다른 Alert 자동 처리: 활동정지 아닌 Alert는 수락 후 계속 진행
+- 활동정지 감지 안정성 극대화
 
 [v0.3.0 업데이트 내역]
 - 🔥 활동정지 Alert 감지 타이밍 최적화: 새 탭 전환 직후 즉시 체크
@@ -40,7 +46,7 @@ Last Updated: 2025-10-31
 """
 
 # 🔢 버전 정보
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __build_date__ = "2025-10-31"
 __author__ = "MTEworld"
 
@@ -3106,35 +3112,54 @@ class CafePostingWorker(QThread):
                 # Alert가 떠있으면 페이지 로딩이 블록되므로 로딩 대기 전에 먼저 체크!
                 if action_name == "수정":
                     self.emit_progress(f"🔍 새 탭 전환 직후 활동정지 alert 체크...", thread_id)
-                    time.sleep(1)  # alert가 나타날 최소 시간 대기
-                    try:
-                        # JavaScript alert만 체크 (가장 빠른 방식)
-                        alert = driver.switch_to.alert
-                        alert_text = alert.text
-                        self.emit_progress(f"🔔 Alert 감지: {alert_text[:50]}...", thread_id)
-                        
-                        # 활동정지 관련 키워드 확인
-                        suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가"]
-                        
-                        if any(keyword in alert_text for keyword in suspension_keywords):
-                            self.emit_progress(f"🚫 활동정지 Alert 감지됨!", thread_id)
-                            self.emit_progress(f"   계정: {successful_account[0]}", thread_id)
-                            self.emit_progress(f"   메시지: {alert_text[:100]}", thread_id)
+                    
+                    # 🔥 여러 번 재시도 (alert가 나타날 시간을 주기 위해)
+                    alert_found = False
+                    for alert_attempt in range(5):  # 최대 5번 시도 (총 5초)
+                        try:
+                            time.sleep(1)  # 1초씩 대기
+                            alert = driver.switch_to.alert
+                            alert_text = alert.text
+                            alert_found = True
+                            self.emit_progress(f"🔔 Alert 감지 (시도 {alert_attempt+1}/5): {alert_text[:80]}...", thread_id)
                             
-                            alert.accept()  # 확인 버튼 클릭
-                            self.emit_progress("✅ 활동정지 Alert 확인 완료", thread_id)
-                            time.sleep(1)
+                            # 활동정지 관련 키워드 확인
+                            suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가"]
                             
-                            # 🔥 해당 계정을 차단 목록에 추가
-                            self.main_window.mark_reply_account_blocked(successful_account[0])
-                            self.emit_progress(f"🚫 {successful_account[0]} 계정 차단 목록 추가 (활동정지)", thread_id)
+                            if any(keyword in alert_text for keyword in suspension_keywords):
+                                self.emit_progress(f"", thread_id)
+                                self.emit_progress(f"🚫🚫🚫 활동정지 Alert 감지됨!", thread_id)
+                                self.emit_progress(f"   계정: {successful_account[0]}", thread_id)
+                                self.emit_progress(f"   메시지: {alert_text}", thread_id)
+                                self.emit_progress(f"", thread_id)
+                                
+                                alert.accept()  # 확인 버튼 클릭
+                                self.emit_progress("✅ 활동정지 Alert 확인 완료", thread_id)
+                                time.sleep(1)
+                                
+                                # 🔥 해당 계정을 차단 목록에 추가
+                                self.main_window.mark_reply_account_blocked(successful_account[0])
+                                self.emit_progress(f"🚫 {successful_account[0]} 계정 차단 목록 추가 (활동정지)", thread_id)
+                                
+                                # 🔥 특별한 예외 발생
+                                raise Exception(f"ACCOUNT_SUSPENDED:{successful_account[0]}")
+                            else:
+                                # 다른 alert는 그냥 수락하고 계속 진행
+                                self.emit_progress(f"ℹ️ 다른 Alert 감지: {alert_text[:50]}", thread_id)
+                                alert.accept()
+                                time.sleep(1)
+                            break  # alert 처리 완료
                             
-                            # 🔥 특별한 예외 발생
-                            raise Exception(f"ACCOUNT_SUSPENDED:{successful_account[0]}")
-                    except Exception as alert_error:
-                        if "ACCOUNT_SUSPENDED" in str(alert_error):
-                            raise alert_error  # 활동정지 예외는 상위로 전달
-                        # alert가 없으면 정상 진행
+                        except Exception as no_alert:
+                            # NoAlertPresentException - alert가 아직 없음
+                            if "ACCOUNT_SUSPENDED" in str(no_alert):
+                                raise no_alert  # 활동정지 예외는 즉시 상위로 전달
+                            # 아직 alert가 없으면 다음 시도로 계속
+                            if alert_attempt < 4:
+                                self.emit_progress(f"⏳ Alert 대기 중... (시도 {alert_attempt+1}/5)", thread_id)
+                            continue
+                    
+                    if not alert_found:
                         self.emit_progress("✅ 활동정지 alert 없음 - 정상 진행", thread_id)
                 
                 # 새 탭에서 페이지 로딩 완료까지 충분히 대기
