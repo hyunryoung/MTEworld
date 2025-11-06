@@ -7,9 +7,16 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.3.1
+Version: 0.3.2
 Author: MTEworld
-Last Updated: 2025-10-31
+Last Updated: 2025-11-06
+
+[v0.3.2 업데이트 내역]
+- 🔥 수정 단계에서 댓글 허용으로 자동 변경 기능 추가
+- 🔥 댓글 작성 전 댓글 허용 상태 확인 및 활성화
+- 댓글 비허용 상태에서 댓글 작성 실패 문제 해결
+- enable_comments_for_writing() 함수 추가
+- 게시글 수정 → 댓글 허용 → 댓글 작성 → 댓글 비허용 완벽한 흐름 구현
 
 [v0.3.1 업데이트 내역]
 - 🔥 활동정지 계정 건너뛰기 로직 완벽 수정 (row 번호 비교 개선)
@@ -50,8 +57,8 @@ Last Updated: 2025-10-31
 """
 
 # 🔢 버전 정보
-__version__ = "0.3.1"
-__build_date__ = "2025-10-31"
+__version__ = "0.3.2"
+__build_date__ = "2025-11-06"
 __author__ = "MTEworld"
 
 # 🔄 업데이트 관련 설정
@@ -3313,6 +3320,8 @@ class CafePostingWorker(QThread):
             # 🆕 공개 설정 확인 및 변경 (수정 모드일 때만)
             if action_name == "수정":
                 self.check_and_set_public_visibility(driver, thread_id)
+                # 🆕 댓글 허용으로 변경 (댓글 작성을 위해)
+                self.enable_comments_for_writing(driver, thread_id)
 
             # 📌 등록 버튼 클릭 및 제목 팝업 재시도 처리 (최대 3번)
             max_submit_retries = 3
@@ -3723,6 +3732,8 @@ class CafePostingWorker(QThread):
                                 
                                 # 공개 설정 확인
                                 self.check_and_set_public_visibility(driver, thread_id)
+                                # 🆕 댓글 허용으로 변경 (댓글 작성을 위해)
+                                self.enable_comments_for_writing(driver, thread_id)
                                 
                                 # 등록 버튼 클릭
                                 self.emit_progress("📝 등록 버튼 클릭 시도", thread_id)
@@ -5946,6 +5957,36 @@ class CafePostingWorker(QThread):
                 
         except Exception as e:
             self.emit_progress(f"⚠️ 공개 설정 확인/변경 실패: {str(e)}", thread_id)
+            # 실패해도 계속 진행 (치명적이지 않음)
+    
+    def enable_comments_for_writing(self, driver, thread_id):
+        """댓글 허용으로 변경 (댓글 작성을 위해)"""
+        try:
+            self.emit_progress("🔍 댓글 설정 확인 중...", thread_id)
+            
+            # 댓글 허용 체크박스 찾기
+            try:
+                comment_checkbox = driver.find_element(By.ID, "coment")
+                
+                # 체크박스가 비활성화(댓글 비허용) 상태인지 확인
+                if not comment_checkbox.is_selected():
+                    self.emit_progress("📝 댓글 비허용 감지 → 댓글 허용으로 변경 중...", thread_id)
+                    
+                    # 댓글 허용 체크박스 클릭
+                    driver.execute_script("arguments[0].click();", comment_checkbox)
+                    self.smart_sleep(0.5, "댓글 허용 선택 후 대기")
+                    
+                    self.emit_progress("✅ 댓글 허용으로 설정 완료 (댓글 작성 가능)", thread_id)
+                    self.smart_sleep(1, "댓글 설정 변경 후 대기")
+                else:
+                    self.emit_progress("ℹ️ 이미 댓글 허용 상태입니다", thread_id)
+                    
+            except Exception as checkbox_error:
+                self.emit_progress(f"⚠️ 댓글 허용 체크박스 처리 실패: {str(checkbox_error)}", thread_id)
+                # 체크박스를 찾을 수 없어도 계속 진행
+                
+        except Exception as e:
+            self.emit_progress(f"⚠️ 댓글 설정 확인/변경 실패: {str(e)}", thread_id)
             # 실패해도 계속 진행 (치명적이지 않음)
     
     def check_login_failure_reason_early(self, driver):
