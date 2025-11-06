@@ -7,9 +7,16 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.3.2
+Version: 0.3.3
 Author: MTEworld
 Last Updated: 2025-11-06
+
+[v0.3.3 업데이트 내역]
+- 🔥 게시판 자동 변경 기능 추가
+- 🔥 엑셀 D열에 목표 게시판 이름 지정 가능
+- 🔥 수정 시 자동으로 다른 게시판으로 이동
+- change_board() 함수 추가
+- 게시판 이름 기반 자동 매칭 및 변경
 
 [v0.3.2 업데이트 내역]
 - 🔥 수정 단계에서 댓글 허용으로 자동 변경 기능 추가
@@ -57,7 +64,7 @@ Last Updated: 2025-11-06
 """
 
 # 🔢 버전 정보
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 __build_date__ = "2025-11-06"
 __author__ = "MTEworld"
 
@@ -2031,6 +2038,7 @@ class CafePostingWorker(QThread):
         real_account_id = account_id.split('_row')[0] if '_row' in account_id else account_id
         target_account = None
         
+        target_board = ""  # 🆕 목표 게시판
         if hasattr(self.main_window, 'account_rows'):
             self.emit_progress(f"🔍 디버그: {account_id} → 실제계정: {real_account_id}, URL: {assigned_url[:30]}...", thread_id)
             for i, row_data in enumerate(self.main_window.account_rows):
@@ -2041,7 +2049,10 @@ class CafePostingWorker(QThread):
                 # 계정 ID가 일치하고 같은 카페인 경우
                 if row_data['account_id'] == real_account_id and row_url_base == assigned_url_base:
                     target_account = (row_data['account_id'], row_data['password'])
+                    target_board = row_data.get('target_board', '')  # 🆕 목표 게시판 가져오기
                     self.emit_progress(f"✅ 작업 전용 계정 찾음: {real_account_id} (행{i+1})", thread_id)
+                    if target_board:
+                        self.emit_progress(f"📋 목표 게시판: [{target_board}]", thread_id)
                     break
         
         if not target_account:
@@ -2146,7 +2157,7 @@ class CafePostingWorker(QThread):
             
             reply_account, reply_url, reply_ip, current_row, next_reply_url = self.write_reply(
                 thread_id, assigned_url, parser, script_folder,
-                assigned_url=assigned_url, target_account=target_account
+                assigned_url=assigned_url, target_account=target_account, target_board=target_board
             )
             if not reply_url:
                 raise Exception("답글 작성 실패 - URL 추출 실패로 해당 원고 건너뜀")
@@ -2252,6 +2263,7 @@ class CafePostingWorker(QThread):
         # 🆕 assigned_url 변수 정의 (호환성)
         assigned_url = url
         target_account = None  # 🆕 기본값 설정 (ID 기반 작업에서만 사용)
+        target_board = ""  # 🆕 목표 게시판 기본값
         
         # 🔥 현재 카페명 가져오기
         cafe_name = getattr(self, 'current_cafe_name', '')
@@ -2343,7 +2355,7 @@ class CafePostingWorker(QThread):
             return
         
         # 1단계: 답글 작성 및 답글 계정 저장
-        reply_account, reply_url, reply_ip, current_row, next_reply_url = self.write_reply(thread_id, url, parser, script_folder, assigned_url=assigned_url, target_account=target_account)
+        reply_account, reply_url, reply_ip, current_row, next_reply_url = self.write_reply(thread_id, url, parser, script_folder, assigned_url=assigned_url, target_account=target_account, target_board=target_board)
         if not reply_url:
             raise Exception("답글 작성 실패 - URL 추출 실패로 해당 원고 건너뜀")
         
@@ -2906,7 +2918,7 @@ class CafePostingWorker(QThread):
             self.emit_progress(f"❌ [쓰레드{thread_id}] 답글용 브라우저 정리 중 오류: {e}", thread_id)
             # 오류가 발생해도 계속 진행
     
-    def write_reply(self, thread_id, url, parser, script_folder=None, assigned_url=None, target_account=None):
+    def write_reply(self, thread_id, url, parser, script_folder=None, assigned_url=None, target_account=None, target_board=None):
         """답글 작성 및 답글 계정 반환"""
         # 🔍 디버그: target_account 확인
         if target_account:
@@ -3246,6 +3258,10 @@ class CafePostingWorker(QThread):
 
             # 작성 페이지는 단일 페이지 구조이므로 iframe 전환 불필요
             self.emit_progress(f"ℹ️ {action_name} 작성 페이지 (단일 페이지 구조)", thread_id)
+
+            # 🆕 게시판 변경 (수정 모드이고 목표 게시판이 지정된 경우만)
+            if action_name == "수정" and target_board:
+                self.change_board(driver, thread_id, target_board)
 
             # 📌 제목 입력 처리
             try:
@@ -5989,6 +6005,98 @@ class CafePostingWorker(QThread):
             self.emit_progress(f"⚠️ 댓글 설정 확인/변경 실패: {str(e)}", thread_id)
             # 실패해도 계속 진행 (치명적이지 않음)
     
+    def change_board(self, driver, thread_id, target_board_name):
+        """게시판 변경 (목표 게시판명으로 이동)"""
+        try:
+            if not target_board_name or target_board_name.strip() == "":
+                self.emit_progress("ℹ️ 목표 게시판이 지정되지 않음 - 게시판 변경 건너뜀", thread_id)
+                return True
+            
+            self.emit_progress(f"🔄 게시판 변경 시작 → [{target_board_name}]", thread_id)
+            
+            # 1. 현재 선택된 게시판 버튼 찾기 (aria-haspopup="true"인 버튼)
+            current_board_button = None
+            current_board_name = ""
+            
+            try:
+                # 게시판 선택 메인 버튼 찾기 (aria-haspopup="true" + class="button")
+                current_board_button = driver.find_element(By.CSS_SELECTOR, 'button.button[aria-haspopup="true"]')
+                current_board_name = current_board_button.text.strip()
+                self.emit_progress(f"✅ 게시판 버튼 찾기 성공: [{current_board_name}]", thread_id)
+                
+                # 현재 게시판과 목표 게시판이 같으면 변경 안함
+                if current_board_name == target_board_name:
+                    self.emit_progress(f"ℹ️ 이미 [{target_board_name}] 게시판입니다 - 변경 불필요", thread_id)
+                    return True
+                
+                self.emit_progress(f"📋 현재 게시판: [{current_board_name}] → 목표: [{target_board_name}]", thread_id)
+                
+            except Exception as e:
+                self.emit_progress(f"⚠️ 게시판 버튼을 찾을 수 없음: {str(e)}", thread_id)
+                return False
+            
+            # 2. 게시판 선택 버튼 클릭하여 목록 열기
+            try:
+                is_expanded = current_board_button.get_attribute("aria-expanded")
+                self.emit_progress(f"🔍 게시판 목록 상태: {is_expanded}", thread_id)
+                
+                # 목록이 닫혀있으면 열기
+                if is_expanded == "false":
+                    driver.execute_script("arguments[0].click();", current_board_button)
+                    self.smart_sleep(1, "게시판 목록 열기 대기")
+                    self.emit_progress("✅ 게시판 목록 열기 완료", thread_id)
+                else:
+                    self.emit_progress("ℹ️ 게시판 목록이 이미 열려있음", thread_id)
+                
+            except Exception as e:
+                self.emit_progress(f"⚠️ 게시판 목록 열기 실패: {str(e)}", thread_id)
+                return False
+            
+            # 3. 게시판 목록에서 목표 게시판 찾기 (option 클래스)
+            try:
+                # 모든 게시판 옵션 가져오기
+                board_options = driver.find_elements(By.CSS_SELECTOR, "button.option")
+                
+                target_board_button = None
+                available_boards = []
+                
+                for option in board_options:
+                    # option_text span에서 정확한 게시판 이름 가져오기
+                    try:
+                        option_text_span = option.find_element(By.CSS_SELECTOR, "span.option_text")
+                        board_name = option_text_span.text.strip()
+                    except:
+                        # span이 없으면 버튼 전체 텍스트 사용
+                        board_name = option.text.strip().replace("선택됨", "").strip()
+                    
+                    available_boards.append(board_name)
+                    
+                    if board_name == target_board_name:
+                        target_board_button = option
+                        self.emit_progress(f"🎯 목표 게시판 찾음: [{board_name}]", thread_id)
+                        break
+                
+                if not target_board_button:
+                    self.emit_progress(f"❌ [{target_board_name}] 게시판을 찾을 수 없습니다", thread_id)
+                    self.emit_progress(f"📋 사용 가능한 게시판 (처음 10개): {', '.join(available_boards[:10])}", thread_id)
+                    return False
+                
+                # 4. 목표 게시판 버튼 클릭
+                driver.execute_script("arguments[0].click();", target_board_button)
+                self.smart_sleep(1.5, "게시판 변경 후 대기")
+                
+                self.emit_progress(f"✅ 게시판 변경 완료: [{current_board_name}] → [{target_board_name}]", thread_id)
+                return True
+                
+            except Exception as e:
+                self.emit_progress(f"⚠️ 게시판 옵션 처리 실패: {str(e)}", thread_id)
+                return False
+                
+        except Exception as e:
+            self.emit_progress(f"⚠️ 게시판 변경 실패: {str(e)}", thread_id)
+            # 실패해도 계속 진행 (치명적이지 않음)
+            return False
+    
     def check_login_failure_reason_early(self, driver):
         """🔧 로그인 실패 원인 우선 체크 (에러 메시지 기반)"""
         try:
@@ -8287,13 +8395,19 @@ class CafePostingMainWindow(QMainWindow):
                 if len(reply_df.columns) >= 3:
                     edit_url = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else ""
                 
+                # 🆕 D열에서 목표 게시판 읽기
+                target_board = ""
+                if len(reply_df.columns) >= 4:
+                    target_board = str(row.iloc[3]).strip() if pd.notna(row.iloc[3]) else ""
+                
                 if id_ and pw and id_ != 'nan' and pw != 'nan':
                     self.reply_accounts.append((id_, pw))
                     # 🆕 각 행을 개별 작업으로 저장
                     self.account_rows.append({
                         'account_id': id_,
                         'password': pw,
-                        'url': edit_url if edit_url and edit_url != 'nan' else ""
+                        'url': edit_url if edit_url and edit_url != 'nan' else "",
+                        'target_board': target_board if target_board and target_board != 'nan' else ""
                     })
                     
                     # 🆕 계정별 수정할 URL 매핑 (여러 URL 지원) - 호환성 유지
