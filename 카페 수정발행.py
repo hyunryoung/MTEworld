@@ -1919,6 +1919,53 @@ class CafePostingWorker(QThread):
                         
                         self.emit_progress(f"✅ {suspended_account} 계정의 모든 원고 실패 처리 완료 - 다음 계정으로 진행", thread_id)
                         self.emit_progress(f"", thread_id)
+                    
+                    # 🔥 삭제된 게시글 예외 처리 - 해당 계정의 모든 원고 건너뛰기
+                    elif "POST_DELETED" in error_message:
+                        deleted_account = error_message.split(":")[-1]
+                        self.emit_progress(f"", thread_id)
+                        self.emit_progress(f"🗑️ 삭제된 게시글 감지: {deleted_account} - 해당 계정의 남은 모든 원고를 건너뜁니다", thread_id)
+                        
+                        # 🔥 해당 계정으로 매핑된 나머지 원고들을 모두 실패 처리
+                        remaining_tasks = task_list[task_idx+1:]  # 현재 작업 이후의 모든 작업
+                        for remaining_task in remaining_tasks:
+                            if len(remaining_task) == 4:  # ID 기준 task
+                                remaining_account_id, remaining_script_index, remaining_script_folder, remaining_assigned_url = remaining_task
+                                
+                                # row 번호 제거 후 비교
+                                remaining_real_account = remaining_account_id.split('_row')[0] if '_row' in remaining_account_id else remaining_account_id
+                                deleted_real_account = deleted_account.split('_row')[0] if '_row' in deleted_account else deleted_account
+                                
+                                # 동일한 계정인 경우 실패 처리
+                                if remaining_real_account == deleted_real_account:
+                                    cafe_name = getattr(self, 'current_cafe_name', '')
+                                    
+                                    result = {
+                                        '답글아이디': remaining_account_id,
+                                        '답글아이디로그인아이피': '삭제된 게시글',
+                                        '답글등록상태': 'X',  # 실패로 표시 (빨간색)
+                                        '폴더명': extract_keyword_from_folder_name(os.path.basename(remaining_script_folder)),
+                                        '답글URL': '🗑️ 삭제된 게시글 (건너뜀)',
+                                        '원본URL': remaining_assigned_url,
+                                        '댓글상황': '작업 안함 (삭제된 게시글)',
+                                        '댓글차단': '❌ 삭제된 게시글',
+                                        'cafe_name': cafe_name,
+                                        'script_folder': remaining_script_folder,
+                                        'account_id': remaining_account_id,
+                                        'unique_key': generate_unique_key(remaining_assigned_url, remaining_script_folder, thread_id),
+                                        'is_preview': False  # 🔥 실제 결과로 표시
+                                    }
+                                    self.signals.result_saved.emit(result)
+                                    self.save_result_immediately(result)
+                                    
+                                    # 작업 완료로 표시 (재시도 방지)
+                                    unique_task_key = f"{remaining_account_id}_{remaining_script_folder}_{remaining_assigned_url}"
+                                    temp_url_index = hash(unique_task_key) % 10000000
+                                    self.progress.mark_task_completed(temp_url_index, remaining_script_index)
+                        
+                        self.emit_progress(f"✅ {deleted_account} 계정의 모든 원고 실패 처리 완료 - 다음 계정으로 진행", thread_id)
+                        self.emit_progress(f"", thread_id)
+                    
                     else:
                         # 일반 오류는 로그만 출력하고 다음 작업 계속
                         self.emit_progress(f"❌ 작업 실패: {task_name} - {error_message}", thread_id)
@@ -2262,30 +2309,64 @@ class CafePostingWorker(QThread):
                 # 🔥 ACCOUNT_SUSPENDED 예외를 상위로 전달하여 해당 계정의 모든 작업 건너뛰기
                 raise Exception(f"ACCOUNT_SUSPENDED:{suspended_account}")
             
-            # 일반 오류 처리
-            self.emit_progress(f"❌ 작업 실패: {account_id}-원고{script_index+1} - {error_message}", thread_id)
-            # 실패 결과 저장
-            result = {
-                '답글아이디': account_id,
-                '답글아이디로그인아이피': '실패',
-                '답글등록상태': 'X',
-                '폴더명': extract_keyword_from_folder_name(os.path.basename(script_folder)),
-                '답글URL': '실패',
-                '원본URL': assigned_url,
-                '댓글상황': '작업 실패',
-                '댓글차단': '❌ 실패',
-                'cafe_name': cafe_name,
-                'script_folder': script_folder,
-                'account_id': account_id,
-                'unique_key': generate_unique_key(assigned_url, script_folder, thread_id)
-            }
-            self.signals.result_saved.emit(result)
-            # 🔥 실시간 저장: 실패 결과도 즉시 백업 저장
-            self.save_result_immediately(result)
+            # 🔥 삭제된 게시글 예외 처리
+            elif "POST_DELETED" in error_message:
+                deleted_account = error_message.split(":")[-1]
+                self.emit_progress(f"", thread_id)
+                self.emit_progress(f"🗑️🗑️🗑️ 삭제된 게시글 감지: {deleted_account}", thread_id)
+                self.emit_progress(f"   ⚠️ 해당 계정으로 매핑된 모든 원고를 실패 처리하고 건너뜁니다", thread_id)
+                self.emit_progress(f"", thread_id)
+                
+                # 삭제된 게시글 결과 저장
+                result = {
+                    '답글아이디': account_id,
+                    '답글아이디로그인아이피': '삭제된 게시글',
+                    '답글등록상태': 'X',  # 실패로 표시 (빨간색)
+                    '폴더명': extract_keyword_from_folder_name(os.path.basename(script_folder)),
+                    '답글URL': '🗑️ 삭제된 게시글',
+                    '원본URL': assigned_url,
+                    '댓글상황': '작업 안함 (삭제된 게시글)',
+                    '댓글차단': '❌ 삭제된 게시글',
+                    'cafe_name': cafe_name,
+                    'script_folder': script_folder,
+                    'account_id': account_id,
+                    'unique_key': generate_unique_key(assigned_url, script_folder, thread_id)
+                }
+                self.signals.result_saved.emit(result)
+                self.save_result_immediately(result)
+                
+                # 드라이버 정리
+                self.emit_progress(f"🧹 [스레드{thread_id+1}] 삭제된 게시글 - 전체 드라이버 정리", thread_id)
+                self.safe_cleanup_thread_drivers(thread_id)
+                
+                # 🔥 POST_DELETED 예외를 상위로 전달하여 해당 계정의 모든 작업 건너뛰기
+                raise Exception(f"POST_DELETED:{deleted_account}")
             
-            # 🔥 실패 시에도 해당 스레드의 모든 드라이버 완전 정리 (크롬창 누적 방지)
-            self.emit_progress(f"🧹 [스레드{thread_id+1}] 작업 실패 - 전체 드라이버 정리", thread_id)
-            self.safe_cleanup_thread_drivers(thread_id)
+            # 일반 오류 처리
+            else:
+                self.emit_progress(f"❌ 작업 실패: {account_id}-원고{script_index+1} - {error_message}", thread_id)
+                # 실패 결과 저장
+                result = {
+                    '답글아이디': account_id,
+                    '답글아이디로그인아이피': '실패',
+                    '답글등록상태': 'X',
+                    '폴더명': extract_keyword_from_folder_name(os.path.basename(script_folder)),
+                    '답글URL': '실패',
+                    '원본URL': assigned_url,
+                    '댓글상황': '작업 실패',
+                    '댓글차단': '❌ 실패',
+                    'cafe_name': cafe_name,
+                    'script_folder': script_folder,
+                    'account_id': account_id,
+                    'unique_key': generate_unique_key(assigned_url, script_folder, thread_id)
+                }
+                self.signals.result_saved.emit(result)
+                # 🔥 실시간 저장: 실패 결과도 즉시 백업 저장
+                self.save_result_immediately(result)
+                
+                # 🔥 실패 시에도 해당 스레드의 모든 드라이버 완전 정리 (크롬창 누적 방지)
+                self.emit_progress(f"🧹 [스레드{thread_id+1}] 작업 실패 - 전체 드라이버 정리", thread_id)
+                self.safe_cleanup_thread_drivers(thread_id)
 
     def process_single_task(self, thread_id, url_index, reply_index, url, script_folder):
         """단일 작업 처리 (답글 작성 + 모든 댓글 작성)"""
@@ -3118,6 +3199,9 @@ class CafePostingWorker(QThread):
                 self.emit_progress("⚠️ 페이지 로딩 시간 초과, 계속 진행합니다...", thread_id)
 
             self.smart_sleep(10, "페이지 로딩 후 대기")
+            
+            # 🔥 삭제된 게시글 팝업 체크 (계정 차단 + 예외 발생)
+            self.handle_deleted_post_popup(driver, thread_id, account_id)
             
             # iframe 진입
             try:
@@ -6342,33 +6426,67 @@ class CafePostingWorker(QThread):
         
         return False
     
-    def handle_deleted_post_popup(self, driver):
-        """삭제된 게시글 팝업 처리"""
+    def handle_deleted_post_popup(self, driver, thread_id=None, account_id=None):
+        """삭제된 게시글 팝업 처리 - 계정 차단 후 특별 예외 발생"""
         try:
-            self.signals.progress.emit("🔍 삭제된 게시글 팝업 확인 중...")
+            if thread_id is not None:
+                self.emit_progress("🔍 삭제된 게시글 팝업 확인 중...", thread_id)
+            else:
+                self.signals.progress.emit("🔍 삭제된 게시글 팝업 확인 중...")
             
             # JavaScript alert 팝업 확인
             try:
                 alert = driver.switch_to.alert
                 alert_text = alert.text
-                self.signals.progress.emit(f"🔔 Alert 감지: {alert_text}")
+                if thread_id is not None:
+                    self.emit_progress(f"🔔 Alert 감지: {alert_text}", thread_id)
+                else:
+                    self.signals.progress.emit(f"🔔 Alert 감지: {alert_text}")
                 
-                # 삭제된 게시글 및 권한 문제 관련 키워드 확인
-                delete_keywords = ["삭제되었거나 없는 게시글", "삭제된 게시글", "존재하지 않는 게시글", 
-                                 "없는 게시글", "삭제되었습니다", "찾을 수 없습니다",
-                                 "작성자 본인만"]  # 권한 문제 (무효한 URL 접속)
+                # 삭제된 게시글 및 권한 문제 관련 키워드 확인 (🔥 키워드 확장)
+                delete_keywords = [
+                    "삭제되었거나 없는 게시글", "삭제된 게시글", "존재하지 않는 게시글", 
+                    "없는 게시글", "삭제되었습니다", "찾을 수 없습니다",
+                    "삭제되었거나 존재하지 않는",  # 🔥 스크린샷 정확한 메시지
+                    "존재하지 않는 게시글입니다",  # 🔥 추가
+                    "작성자 본인만"  # 권한 문제 (무효한 URL 접속)
+                ]
                 
                 if any(keyword in alert_text for keyword in delete_keywords):
                     alert.accept()  # 확인 버튼 클릭
-                    self.signals.progress.emit("✅ 삭제된 게시글 Alert 처리 완료")
+                    
+                    if thread_id is not None:
+                        self.emit_progress("✅ 삭제된 게시글 Alert 처리 완료", thread_id)
+                    else:
+                        self.signals.progress.emit("✅ 삭제된 게시글 Alert 처리 완료")
+                    
                     time.sleep(1)
+                    
+                    # 🔥 계정 ID가 있으면 차단 목록에 추가하고 예외 발생
+                    if account_id:
+                        if thread_id is not None:
+                            self.emit_progress(f"🚫 삭제된 게시글 감지! 계정: {account_id}", thread_id)
+                            self.emit_progress(f"   메시지: {alert_text[:100]}", thread_id)
+                        
+                        # 해당 계정을 차단 목록에 추가
+                        self.main_window.mark_reply_account_blocked(account_id)
+                        
+                        if thread_id is not None:
+                            self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (삭제된 게시글)", thread_id)
+                        
+                        # 🔥 특별한 예외 발생 (상위에서 감지해서 해당 계정의 모든 작업 건너뜀)
+                        raise Exception(f"POST_DELETED:{account_id}")
+                    
                     return True
                 else:
                     # 다른 종류의 alert는 그대로 둠
                     return False
                     
-            except:
-                # alert가 없는 경우
+            except Exception as e:
+                # POST_DELETED 예외는 다시 발생
+                if "POST_DELETED" in str(e):
+                    raise e
+                # alert가 없는 경우는 pass
                 pass
                 
             # 페이지 내 에러 메시지 확인
@@ -6386,15 +6504,35 @@ class CafePostingWorker(QThread):
                         if element.is_displayed():
                             error_text = element.text
                             if any(keyword in error_text for keyword in ["삭제", "없는", "존재하지"]):
-                                self.signals.progress.emit(f"✅ 삭제된 게시글 메시지 감지: {error_text}")
+                                if thread_id is not None:
+                                    self.emit_progress(f"✅ 삭제된 게시글 메시지 감지: {error_text}", thread_id)
+                                else:
+                                    self.signals.progress.emit(f"✅ 삭제된 게시글 메시지 감지: {error_text}")
+                                
+                                # 🔥 계정 ID가 있으면 차단 목록에 추가하고 예외 발생
+                                if account_id:
+                                    self.main_window.mark_reply_account_blocked(account_id)
+                                    if thread_id is not None:
+                                        self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (삭제된 게시글)", thread_id)
+                                    raise Exception(f"POST_DELETED:{account_id}")
+                                
                                 return True
-            except:
+            except Exception as e:
+                # POST_DELETED 예외는 다시 발생
+                if "POST_DELETED" in str(e):
+                    raise e
                 pass
                 
             return False
             
         except Exception as e:
-            self.signals.progress.emit(f"⚠️ 삭제된 게시글 팝업 처리 중 오류: {str(e)}")
+            # POST_DELETED 예외는 다시 발생
+            if "POST_DELETED" in str(e):
+                raise e
+            if thread_id is not None:
+                self.emit_progress(f"⚠️ 삭제된 게시글 팝업 처리 중 오류: {str(e)}", thread_id)
+            else:
+                self.signals.progress.emit(f"⚠️ 삭제된 게시글 팝업 처리 중 오류: {str(e)}")
             return False
 
     def handle_activity_suspension_popup(self, driver, thread_id, account_id):
