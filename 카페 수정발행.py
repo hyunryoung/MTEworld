@@ -7,9 +7,18 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.3.6
+Version: 0.3.7
 Author: MTEworld
 Last Updated: 2026-01-29
+
+[v0.3.7 업데이트 내역]
+- 🔥 원고 폴더 자동 이동 기능 추가
+  - 성공 시 → 완료/ 폴더로 이동
+  - 삭제된 게시글 → 실패_삭제됨/ 폴더로 이동
+  - 활동정지 → 실패_활동정지/ 폴더로 이동
+  - 기타 실패 → 실패/ 폴더로 이동
+- move_script_folder() 함수 추가
+- 작업된 원고와 미작업 원고 자동 구분
 
 [v0.3.6 업데이트 내역]
 - 🔥 삭제된 게시글 팝업 감지 시 해당 계정 전체 스킵 (POST_DELETED)
@@ -89,7 +98,7 @@ Last Updated: 2026-01-29
 """
 
 # 🔢 버전 정보
-__version__ = "0.3.6"
+__version__ = "0.3.7"
 __build_date__ = "2026-01-29"
 __author__ = "MTEworld"
 
@@ -2279,6 +2288,9 @@ class CafePostingWorker(QThread):
                 final_update = {'댓글차단': final_comment_block}
                 self.main_window.update_result(current_row, final_update)
             
+            # 🔥 작업 완료 시 원고 폴더 이동 (완료 폴더로)
+            self.move_script_folder(script_folder, 'success', thread_id)
+            
             # 🔥 작업 완료 후 해당 스레드의 모든 드라이버 완전 정리 (크롬창 누적 방지)
             self.emit_progress(f"🧹 [스레드{thread_id+1}] 작업 완료 - 전체 드라이버 정리 시작", thread_id)
             self.safe_cleanup_thread_drivers(thread_id)
@@ -2311,6 +2323,9 @@ class CafePostingWorker(QThread):
                 }
                 self.signals.result_saved.emit(result)
                 self.save_result_immediately(result)
+                
+                # 🔥 활동정지 시 원고 폴더 이동
+                self.move_script_folder(script_folder, 'suspended', thread_id)
                 
                 # 드라이버 정리
                 self.emit_progress(f"🧹 [스레드{thread_id+1}] 활동정지 계정 - 전체 드라이버 정리", thread_id)
@@ -2345,6 +2360,9 @@ class CafePostingWorker(QThread):
                 self.signals.result_saved.emit(result)
                 self.save_result_immediately(result)
                 
+                # 🔥 삭제된 게시글 시 원고 폴더 이동
+                self.move_script_folder(script_folder, 'deleted', thread_id)
+                
                 # 드라이버 정리
                 self.emit_progress(f"🧹 [스레드{thread_id+1}] 삭제된 게시글 - 전체 드라이버 정리", thread_id)
                 self.safe_cleanup_thread_drivers(thread_id)
@@ -2373,6 +2391,9 @@ class CafePostingWorker(QThread):
                 self.signals.result_saved.emit(result)
                 # 🔥 실시간 저장: 실패 결과도 즉시 백업 저장
                 self.save_result_immediately(result)
+                
+                # 🔥 일반 실패 시 원고 폴더 이동
+                self.move_script_folder(script_folder, 'failed', thread_id)
                 
                 # 🔥 실패 시에도 해당 스레드의 모든 드라이버 완전 정리 (크롬창 누적 방지)
                 self.emit_progress(f"🧹 [스레드{thread_id+1}] 작업 실패 - 전체 드라이버 정리", thread_id)
@@ -6491,6 +6512,67 @@ class CafePostingWorker(QThread):
         except Exception as e:
             # 체크 실패해도 계속 진행 (False 반환)
             return False, None
+    
+    def move_script_folder(self, script_folder, status, thread_id=None):
+        """🔥 작업 완료/실패 시 원고 폴더 이동
+        
+        Args:
+            script_folder: 원고 폴더 경로
+            status: 'success', 'deleted', 'suspended', 'protection', 'failed'
+            thread_id: 스레드 ID (로그용)
+        """
+        try:
+            if not script_folder or not os.path.exists(script_folder):
+                self.emit_progress(f"⚠️ 원고 폴더가 존재하지 않음: {script_folder}", thread_id)
+                return False
+            
+            # 원고 폴더의 상위 디렉토리 (원고들이 있는 폴더)
+            parent_dir = os.path.dirname(script_folder)
+            folder_name = os.path.basename(script_folder)
+            
+            # 상태별 대상 폴더 결정
+            status_folders = {
+                'success': '완료',
+                'deleted': '실패_삭제됨',
+                'suspended': '실패_활동정지',
+                'protection': '실패_보호조치',
+                'failed': '실패'
+            }
+            
+            target_folder_name = status_folders.get(status, '실패')
+            target_dir = os.path.join(parent_dir, target_folder_name)
+            
+            # 대상 폴더가 없으면 생성
+            os.makedirs(target_dir, exist_ok=True)
+            
+            # 이동할 경로
+            destination = os.path.join(target_dir, folder_name)
+            
+            # 이미 같은 이름의 폴더가 있으면 번호 추가
+            if os.path.exists(destination):
+                count = 1
+                while os.path.exists(f"{destination}_{count}"):
+                    count += 1
+                destination = f"{destination}_{count}"
+            
+            # 폴더 이동
+            shutil.move(script_folder, destination)
+            
+            status_emoji = {
+                'success': '✅',
+                'deleted': '🗑️',
+                'suspended': '🚫',
+                'protection': '🛡️',
+                'failed': '❌'
+            }
+            emoji = status_emoji.get(status, '📁')
+            
+            self.emit_progress(f"{emoji} 원고 폴더 이동: {folder_name} → {target_folder_name}/", thread_id)
+            return True
+            
+        except Exception as e:
+            self.emit_progress(f"⚠️ 원고 폴더 이동 실패: {str(e)}", thread_id)
+            return False
     
     def has_captcha(self, driver):
         """현재 페이지에 캡차가 있는지 확인"""
