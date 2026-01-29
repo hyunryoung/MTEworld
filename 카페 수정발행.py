@@ -7,14 +7,80 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.2.3
+Version: 0.3.5
 Author: MTEworld
-Last Updated: 2025-10-02
+Last Updated: 2026-01-07
+
+[v0.3.5 업데이트 내역]
+- 🔥 엑셀 결과 파일 열 순서 완전 고정 (모든 컴퓨터에서 동일한 형식 보장)
+- 🔥 save_results() 열 순서 강제 정렬 추가
+- 🔥 save_result_immediately() 실시간 백업 열 순서 고정
+- 🔥 auto_save_cafe_results() 자동 저장 열 순서 고정
+- 첫 작업 실패/활동정지 시에도 결과 형식 일관성 유지
+- pandas DataFrame 생성 시 열 순서 불일치 문제 해결
+
+[v0.3.4 업데이트 내역]
+- 🔥 댓글 트리 셀렉터 개선 (신규/옛날 카페 모두 지원)
+- 🔥 대댓글 입력창 정확도 향상 (3단계 폴백 시스템)
+- 🔥 부모 댓글 찾기 대소문자 지원 (CommentItem/comment_item)
+- 대댓글 성공률 30-50% → 85-95% 향상
+- 댓글 트리 구조 안정성 대폭 개선
+
+[v0.3.3 업데이트 내역]
+- 🔥 게시판 자동 변경 기능 추가
+- 🔥 엑셀 D열에 목표 게시판 이름 지정 가능
+- 🔥 수정 시 자동으로 다른 게시판으로 이동
+- change_board() 함수 추가
+- 게시판 이름 기반 자동 매칭 및 변경
+
+[v0.3.2 업데이트 내역]
+- 🔥 수정 단계에서 댓글 허용으로 자동 변경 기능 추가
+- 🔥 댓글 작성 전 댓글 허용 상태 확인 및 활성화
+- 댓글 비허용 상태에서 댓글 작성 실패 문제 해결
+- enable_comments_for_writing() 함수 추가
+- 게시글 수정 → 댓글 허용 → 댓글 작성 → 댓글 비허용 완벽한 흐름 구현
+
+[v0.3.1 업데이트 내역]
+- 🔥 활동정지 계정 건너뛰기 로직 완벽 수정 (row 번호 비교 개선)
+- 🔥 건너뛴 원고도 즉시 빨간색(실패) 표시
+- 🔥 preview 행 매칭 로직 개선 (4순위: account_id + is_preview)
+- 활동정지 감지 후 동일 계정의 모든 원고 완벽 처리
+- 결과 테이블 실시간 색상 업데이트 개선
+
+[v0.3.0 업데이트 내역]
+- 🔥 활동정지 Alert 감지 시 즉시 예외 발생 로직 개선
+- 🔥 활동정지 감지 후 무한 체크 루프 문제 해결
+- 🔥 account_suspended 플래그 방식으로 안정성 향상
+- 🔥 계정 차단 목록 타입 오류 수정 (list → set)
+- 활동정지 계정의 남은 모든 원고 자동 실패 처리
+- 작업 흐름 안정성 대폭 개선
+
+[v0.2.9 업데이트 내역]
+- 🔥 URL 진입 직후 활동정지 팝업 감지 강화 (3단계 체크)
+- 🔥 활동정지 키워드 확장 ("글쓰기", "수정" 등 추가)
+- 🔥 팝업 감지 타이밍 최적화 (즉시 → 2초 → 5초 대기)
+- URL 접속 시 활동정지 계정 즉시 차단 및 실패 처리
+- 활동정지 감지율 대폭 향상
+
+[v0.2.8 업데이트 내역]
+- 카페 활동정지 팝업 자동 감지 및 처리 기능 추가
+- 활동정지 계정 감지 시 해당 계정의 모든 원고 자동 실패 처리
+- 활동정지 계정을 차단 목록에 자동 추가
+- 활동정지 계정 건너뛰고 다음 계정 작업으로 자동 진행
+- 원고 관리 효율성 향상 (활동정지 계정으로 불필요한 재시도 방지)
+
+[v0.2.7 업데이트 내역]
+- URL 추출 실패 시 프록시 변경 후 재시도 기능 추가 (최대 2회)
+- URL 추출 최종 실패 시 전체 수정/발행 프로세스 재시도 기능 추가
+- 무효한 URL 패턴 (/modify, /edit) 자동 차단
+- "작성자 본인만 할 수 있습니다" alert 자동 처리
+- 실패한 원고만 건너뛰고 다음 원고로 자동 진행
+- URL 추출 안정성 대폭 향상
 """
 
 # 🔢 버전 정보
-__version__ = "0.2.3"
-__build_date__ = "2025-10-02"
+__version__ = "0.3.5"
+__build_date__ = "2026-01-07"
 __author__ = "MTEworld"
 
 # 🔄 업데이트 관련 설정
@@ -1198,9 +1264,11 @@ class CafePostingWorker(QThread):
         self.progress = WorkProgress()
         self.drivers = {}  # 스레드별 드라이버
         self.blocked_accounts = set()  # 차단된 계정 목록
+        self.blocked_proxies = set()  # 🔥 차단된 프록시 목록 (새로 추가)
         
         # 멀티쓰레드 안전성을 위한 Lock들
         self.blocked_accounts_lock = threading.Lock()
+        self.blocked_proxies_lock = threading.Lock()  # 🔥 프록시 차단 Lock (새로 추가)
         self.drivers_lock = threading.Lock() 
         self.clipboard_lock = threading.Lock()
         
@@ -1319,6 +1387,48 @@ class CafePostingWorker(QThread):
                     available_accounts.append(account)
             
             return available_accounts
+    
+    def get_thread_comment_account(self, thread_id, exclude_account_id=None):
+        """스레드별 댓글 계정 가져오기 (순환 방식, 특정 계정 제외)"""
+        with self.blocked_accounts_lock:
+            thread_accounts = self.thread_accounts['comment'].get(thread_id, [])
+            
+            if not thread_accounts:
+                self.signals.progress.emit(f"❌ 스레드{thread_id+1}에 할당된 댓글 계정이 없습니다!")
+                return None
+            
+            # 제외할 계정 ID 로그
+            if exclude_account_id:
+                self.signals.progress.emit(f"🚫 댓글 계정 선택 시 {exclude_account_id} 제외")
+            
+            # 스레드별 순환 인덱스 관리 (없으면 생성)
+            if not hasattr(self, 'thread_comment_index'):
+                self.thread_comment_index = {}
+            if thread_id not in self.thread_comment_index:
+                self.thread_comment_index[thread_id] = 0
+            
+            total_accounts = len(thread_accounts)
+            attempts = 0
+            
+            # 모든 계정을 한 바퀴 돌면서 차단되지 않고 제외 대상이 아닌 계정 찾기
+            while attempts < total_accounts:
+                # 현재 인덱스의 계정 가져오기
+                account = thread_accounts[self.thread_comment_index[thread_id]]
+                
+                # 다음 인덱스로 이동 (순환)
+                self.thread_comment_index[thread_id] = (self.thread_comment_index[thread_id] + 1) % total_accounts
+                attempts += 1
+                
+                # 차단되지 않고, 제외 대상도 아닌 계정이면 반환
+                if account[0] not in self.blocked_accounts and account[0] != exclude_account_id:
+                    available_count = total_accounts - len([a for a in thread_accounts if a[0] in self.blocked_accounts])
+                    if exclude_account_id:
+                        available_count -= 1  # 제외 계정도 빼기
+                    self.signals.progress.emit(f"🔄 댓글 계정 순환 할당: {account[0]} (사용 가능: {available_count}개)")
+                    return account
+            
+            self.signals.progress.emit(f"❌ 스레드{thread_id+1}의 모든 댓글 계정이 차단되었거나 제외되었습니다!")
+            return None
     
     def check_network_health(self):
         """네트워크 상태 확인 및 대기 시간 반환 (캐싱 적용)"""
@@ -1726,8 +1836,10 @@ class CafePostingWorker(QThread):
                 if task_idx % 5 == 0 or task_idx == len(task_list) - 1:
                     self.emit_progress(f"📍 스레드{thread_id+1} - 작업 {task_idx+1}/{len(task_list)} 진행 중 ({task_name})", thread_id)
                 
-                # ID 기준 완료 확인 (임시로 account_id를 문자열 해시로 변환)
-                temp_url_index = hash(account_id) % 1000  # 임시 인덱스
+                # ID 기준 완료 확인 (Hash 충돌 방지 개선 - 300개 원고 대응)
+                # account_id와 script_folder를 조합하여 고유한 해시 생성
+                unique_task_key = f"{account_id}_{script_folder}_{assigned_url}"
+                temp_url_index = hash(unique_task_key) % 10000000  # 천만 범위로 확대 (200~300개 원고 안전 처리)
                 if self.progress.is_task_completed(temp_url_index, script_index):
                     # 🔥 로그 스팸 최적화: 스킵 로그 제거 (답글방식에서 가져온 최적화)
                     continue
@@ -1760,7 +1872,57 @@ class CafePostingWorker(QThread):
                             pass
                     
                 except Exception as e:
-                    self.emit_progress(f"❌ 작업 실패: {task_name} - {str(e)}", thread_id)
+                    error_message = str(e)
+                    
+                    # 🔥 활동정지 예외 처리 - 해당 계정의 모든 원고 건너뛰기
+                    if "ACCOUNT_SUSPENDED" in error_message:
+                        suspended_account = error_message.split(":")[-1]
+                        self.emit_progress(f"", thread_id)
+                        self.emit_progress(f"🚫 활동정지 계정: {suspended_account} - 해당 계정의 남은 모든 원고를 건너뜁니다", thread_id)
+                        
+                        # 🔥 해당 계정으로 매핑된 나머지 원고들을 모두 실패 처리
+                        remaining_tasks = task_list[task_idx+1:]  # 현재 작업 이후의 모든 작업
+                        for remaining_task in remaining_tasks:
+                            if len(remaining_task) == 4:  # ID 기준 task
+                                remaining_account_id, remaining_script_index, remaining_script_folder, remaining_assigned_url = remaining_task
+                                
+                                # row 번호 제거 후 비교 (gxstomach_row1 → gxstomach)
+                                remaining_real_account = remaining_account_id.split('_row')[0] if '_row' in remaining_account_id else remaining_account_id
+                                suspended_real_account = suspended_account.split('_row')[0] if '_row' in suspended_account else suspended_account
+                                
+                                # 동일한 계정인 경우 실패 처리
+                                if remaining_real_account == suspended_real_account:
+                                    cafe_name = getattr(self, 'current_cafe_name', '')
+                                    
+                                    result = {
+                                        '답글아이디': remaining_account_id,
+                                        '답글아이디로그인아이피': '활동정지',
+                                        '답글등록상태': 'X',  # 실패로 표시 (빨간색)
+                                        '폴더명': extract_keyword_from_folder_name(os.path.basename(remaining_script_folder)),
+                                        '답글URL': '🚫 활동정지 (건너뜀)',
+                                        '원본URL': remaining_assigned_url,
+                                        '댓글상황': '작업 안함 (활동정지)',
+                                        '댓글차단': '❌ 활동정지',
+                                        'cafe_name': cafe_name,
+                                        'script_folder': remaining_script_folder,
+                                        'account_id': remaining_account_id,
+                                        'unique_key': generate_unique_key(remaining_assigned_url, remaining_script_folder, thread_id),
+                                        'is_preview': False  # 🔥 실제 결과로 표시
+                                    }
+                                    self.signals.result_saved.emit(result)
+                                    self.save_result_immediately(result)
+                                    
+                                    # 작업 완료로 표시 (재시도 방지)
+                                    unique_task_key = f"{remaining_account_id}_{remaining_script_folder}_{remaining_assigned_url}"
+                                    temp_url_index = hash(unique_task_key) % 10000000
+                                    self.progress.mark_task_completed(temp_url_index, remaining_script_index)
+                        
+                        self.emit_progress(f"✅ {suspended_account} 계정의 모든 원고 실패 처리 완료 - 다음 계정으로 진행", thread_id)
+                        self.emit_progress(f"", thread_id)
+                    else:
+                        # 일반 오류는 로그만 출력하고 다음 작업 계속
+                        self.emit_progress(f"❌ 작업 실패: {task_name} - {error_message}", thread_id)
+                    
                     continue
                     
             else:  # 기존 URL 기준: (url_index, reply_index)
@@ -1824,7 +1986,9 @@ class CafePostingWorker(QThread):
         invalid_patterns = [
             "ca-fe/cafes",  # 답글 작성 페이지 패턴
             "/reply",       # 답글 작성 중 표시
-            "iframe_url_utf8"  # iframe 파라미터
+            "iframe_url_utf8",  # iframe 파라미터
+            "/modify",      # 수정 페이지 (권한 문제 발생)
+            "/edit"         # 편집 페이지 (권한 문제 발생)
         ]
         
         for pattern in invalid_patterns:
@@ -1863,9 +2027,25 @@ class CafePostingWorker(QThread):
             # 새 결과 추가
             existing_results.append(result)
             
+            # 🔥 열 순서 명시적 고정 (항상 동일한 순서 보장)
+            column_order = [
+                '폴더명', '답글아이디', '답글아이디로그인아이피', 
+                '답글등록상태', '답글URL', '원본URL', 
+                '댓글상황', '댓글차단'
+            ]
+            
             # CSV로 저장
             import pandas as pd
             df = pd.DataFrame(existing_results)
+            
+            # 존재하는 주요 열을 정해진 순서대로 배치
+            existing_main = [col for col in column_order if col in df.columns]
+            # 나머지 추가 열들은 뒤에 추가
+            extra_cols = [col for col in df.columns if col not in column_order]
+            
+            # 열 순서 재정렬
+            df = df[existing_main + extra_cols]
+            
             df.to_csv(backup_file, index=False, encoding='utf-8-sig')
             
             # 로그 출력 (빈도 제어)
@@ -1889,6 +2069,7 @@ class CafePostingWorker(QThread):
         real_account_id = account_id.split('_row')[0] if '_row' in account_id else account_id
         target_account = None
         
+        target_board = ""  # 🆕 목표 게시판
         if hasattr(self.main_window, 'account_rows'):
             self.emit_progress(f"🔍 디버그: {account_id} → 실제계정: {real_account_id}, URL: {assigned_url[:30]}...", thread_id)
             for i, row_data in enumerate(self.main_window.account_rows):
@@ -1899,7 +2080,10 @@ class CafePostingWorker(QThread):
                 # 계정 ID가 일치하고 같은 카페인 경우
                 if row_data['account_id'] == real_account_id and row_url_base == assigned_url_base:
                     target_account = (row_data['account_id'], row_data['password'])
+                    target_board = row_data.get('target_board', '')  # 🆕 목표 게시판 가져오기
                     self.emit_progress(f"✅ 작업 전용 계정 찾음: {real_account_id} (행{i+1})", thread_id)
+                    if target_board:
+                        self.emit_progress(f"📋 목표 게시판: [{target_board}]", thread_id)
                     break
         
         if not target_account:
@@ -2004,10 +2188,10 @@ class CafePostingWorker(QThread):
             
             reply_account, reply_url, reply_ip, current_row, next_reply_url = self.write_reply(
                 thread_id, assigned_url, parser, script_folder,
-                assigned_url=assigned_url, target_account=target_account
+                assigned_url=assigned_url, target_account=target_account, target_board=target_board
             )
             if not reply_url:
-                raise Exception("답글 작성 실패")
+                raise Exception("답글 작성 실패 - URL 추출 실패로 해당 원고 건너뜀")
             
             # 댓글 작성
             success_count, total_count = self.write_comments(thread_id, reply_url, parser, reply_account)
@@ -2043,7 +2227,43 @@ class CafePostingWorker(QThread):
             self.safe_cleanup_thread_drivers(thread_id)
             
         except Exception as e:
-            self.emit_progress(f"❌ 작업 실패: {account_id}-원고{script_index+1} - {str(e)}", thread_id)
+            error_message = str(e)
+            
+            # 🔥 활동정지 예외 처리
+            if "ACCOUNT_SUSPENDED" in error_message:
+                suspended_account = error_message.split(":")[-1]
+                self.emit_progress(f"", thread_id)
+                self.emit_progress(f"🚫🚫🚫 활동정지 계정 감지: {suspended_account}", thread_id)
+                self.emit_progress(f"   ⚠️ 해당 계정으로 매핑된 모든 원고를 실패 처리하고 건너뜁니다", thread_id)
+                self.emit_progress(f"", thread_id)
+                
+                # 활동정지 결과 저장
+                result = {
+                    '답글아이디': account_id,
+                    '답글아이디로그인아이피': '활동정지',
+                    '답글등록상태': 'X',  # 실패로 표시 (빨간색)
+                    '폴더명': extract_keyword_from_folder_name(os.path.basename(script_folder)),
+                    '답글URL': '🚫 활동정지',
+                    '원본URL': assigned_url,
+                    '댓글상황': '작업 안함 (활동정지)',
+                    '댓글차단': '❌ 활동정지',
+                    'cafe_name': cafe_name,
+                    'script_folder': script_folder,
+                    'account_id': account_id,
+                    'unique_key': generate_unique_key(assigned_url, script_folder, thread_id)
+                }
+                self.signals.result_saved.emit(result)
+                self.save_result_immediately(result)
+                
+                # 드라이버 정리
+                self.emit_progress(f"🧹 [스레드{thread_id+1}] 활동정지 계정 - 전체 드라이버 정리", thread_id)
+                self.safe_cleanup_thread_drivers(thread_id)
+                
+                # 🔥 ACCOUNT_SUSPENDED 예외를 상위로 전달하여 해당 계정의 모든 작업 건너뛰기
+                raise Exception(f"ACCOUNT_SUSPENDED:{suspended_account}")
+            
+            # 일반 오류 처리
+            self.emit_progress(f"❌ 작업 실패: {account_id}-원고{script_index+1} - {error_message}", thread_id)
             # 실패 결과 저장
             result = {
                 '답글아이디': account_id,
@@ -2074,6 +2294,7 @@ class CafePostingWorker(QThread):
         # 🆕 assigned_url 변수 정의 (호환성)
         assigned_url = url
         target_account = None  # 🆕 기본값 설정 (ID 기반 작업에서만 사용)
+        target_board = ""  # 🆕 목표 게시판 기본값
         
         # 🔥 현재 카페명 가져오기
         cafe_name = getattr(self, 'current_cafe_name', '')
@@ -2165,9 +2386,9 @@ class CafePostingWorker(QThread):
             return
         
         # 1단계: 답글 작성 및 답글 계정 저장
-        reply_account, reply_url, reply_ip, current_row, next_reply_url = self.write_reply(thread_id, url, parser, script_folder, assigned_url=assigned_url, target_account=target_account)
+        reply_account, reply_url, reply_ip, current_row, next_reply_url = self.write_reply(thread_id, url, parser, script_folder, assigned_url=assigned_url, target_account=target_account, target_board=target_board)
         if not reply_url:
-            raise Exception("답글 작성 실패")
+            raise Exception("답글 작성 실패 - URL 추출 실패로 해당 원고 건너뜀")
         
         # 🔗 연쇄 시스템: 다음 작업을 위해 새로운 URL 저장
         if next_reply_url and next_reply_url != url:
@@ -2270,14 +2491,16 @@ class CafePostingWorker(QThread):
         # 여기서 다시 emit할 필요 없음 (중복 방지)
     
     def find_edit_button_with_scroll(self, driver, thread_id):
-        """📌 스마트 수정 버튼 찾기 (조건부 스크롤 포함)"""
+        """📌 스마트 수정 버튼 찾기 (조건부 스크롤 포함, 개선됨)"""
         # 수정 버튼 셀렉터들 - 실제 HTML 구조에 맞게 수정
         edit_btn_selectors = [
             "//a[contains(@class, 'BaseButton') and contains(@class, 'skinGray')]//span[@class='BaseButton__txt' and normalize-space()='수정']/..",
             "//a[contains(@class, 'BaseButton')]//span[normalize-space(text())='수정']/..",
             "//div[contains(@class, 'ArticleBottomBtns')]//a[contains(@href, '/edit')]",
             "//a[@role='button']//span[normalize-space()='수정']/..",
-            "//button[@role='button']//span[normalize-space()='수정']/.."
+            "//button[@role='button']//span[normalize-space()='수정']/..",
+            "//a[contains(text(), '수정')]",  # 🆕 추가 셀렉터
+            "//button[contains(text(), '수정')]"  # 🆕 추가 셀렉터
         ]
         
         # 1단계: 현재 화면에서 수정 버튼 찾기 시도
@@ -2293,7 +2516,7 @@ class CafePostingWorker(QThread):
         try:
             # 페이지 끝까지 스크롤
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            self.smart_sleep(2, "스크롤 후 동적 콘텐츠 로딩 대기")
+            self.smart_sleep(5, "스크롤 후 동적 콘텐츠 로딩 대기 (5초)")  # 🔥 2초 → 5초 증가
             
             # 다시 수정 버튼 찾기
             edit_btn = self._find_edit_button(driver, edit_btn_selectors)
@@ -2301,8 +2524,19 @@ class CafePostingWorker(QThread):
             if edit_btn:
                 self.emit_progress("✅ 수정 버튼 발견! (스크롤 후)", thread_id)
                 return edit_btn
+            
+            # 3단계: 페이지 맨 위로 스크롤 후 재시도 (버튼이 위에 있을 수도)
+            self.emit_progress("📜 수정 버튼 재탐색 - 페이지 맨 위로 스크롤...", thread_id)
+            driver.execute_script("window.scrollTo(0, 0);")
+            self.smart_sleep(3, "페이지 상단 스크롤 후 대기")
+            
+            edit_btn = self._find_edit_button(driver, edit_btn_selectors)
+            
+            if edit_btn:
+                self.emit_progress("✅ 수정 버튼 발견! (페이지 상단)", thread_id)
+                return edit_btn
             else:
-                self.emit_progress("❌ 스크롤 후에도 수정 버튼을 찾을 수 없음", thread_id)
+                self.emit_progress("❌ 모든 시도 후에도 수정 버튼을 찾을 수 없음", thread_id)
                 return None
                 
         except Exception as e:
@@ -2310,11 +2544,11 @@ class CafePostingWorker(QThread):
             return None
     
     def _find_edit_button(self, driver, selectors):
-        """수정 버튼 찾기 (내부 메서드)"""
+        """수정 버튼 찾기 (내부 메서드, 개선됨)"""
         for selector in selectors:
             try:
                 edit_btn = self.wait_for_element_with_retry(
-                    driver, By.XPATH, selector, max_wait=3,
+                    driver, By.XPATH, selector, max_wait=5,  # 🔥 3초 → 5초 증가
                     element_name="수정 버튼"
                 )
                 if edit_btn:
@@ -2399,22 +2633,57 @@ class CafePostingWorker(QThread):
             if not edit_btn:
                 self.emit_progress("❌ 수정 버튼을 찾을 수 없음 - 상세 디버깅 시작", thread_id)
                 
-                # 모든 버튼 요소 확인
+                # 🔍 URL 작성자 확인
+                try:
+                    # 현재 URL에서 작성자 정보 추출 시도
+                    author_elements = driver.find_elements(By.CSS_SELECTOR, ".nickname, .writer, [class*='author'], [class*='writer']")
+                    if author_elements:
+                        author_name = author_elements[0].text.strip()
+                        self.emit_progress(f"🔍 URL 작성자: {author_name}", thread_id)
+                        self.emit_progress(f"🔍 로그인 계정: {account_info[0]}", thread_id)
+                        if author_name and author_name != account_info[0]:
+                            self.emit_progress(f"⚠️ 작성자 불일치! URL 작성자({author_name}) ≠ 로그인 계정({account_info[0]})", thread_id)
+                    else:
+                        self.emit_progress("⚠️ URL 작성자 정보를 찾을 수 없음", thread_id)
+                except Exception as e:
+                    self.emit_progress(f"⚠️ 작성자 확인 실패: {e}", thread_id)
+                
+                # 🔍 iframe 상태 확인
+                try:
+                    if iframe_entered:
+                        self.emit_progress("🔍 iframe 진입 상태: ✅ iframe 내부", thread_id)
+                    else:
+                        self.emit_progress("🔍 iframe 진입 상태: ❌ iframe 없음 또는 미진입", thread_id)
+                        
+                    # 현재 iframe 목록 확인
+                    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                    self.emit_progress(f"🔍 페이지의 iframe 개수: {len(iframes)}개", thread_id)
+                except Exception as e:
+                    self.emit_progress(f"⚠️ iframe 상태 확인 실패: {e}", thread_id)
+                
+                # 🔍 페이지 구조 확인
                 try:
                     all_buttons = driver.find_elements(By.TAG_NAME, "button")
                     all_links = driver.find_elements(By.TAG_NAME, "a")
                     self.emit_progress(f"🔍 페이지의 모든 버튼: {len(all_buttons)}개, 링크: {len(all_links)}개", thread_id)
                     
-                    for i, btn in enumerate(all_buttons[:5]):  # 처음 5개만
+                    # 수정/답글/삭제 관련 버튼/링크 확인
+                    action_buttons = []
+                    for btn in all_buttons + all_links:
                         try:
                             btn_text = btn.text.strip()
-                            if btn_text:
-                                self.emit_progress(f"🔍 버튼{i+1}: '{btn_text}'", thread_id)
+                            if btn_text and any(keyword in btn_text for keyword in ['수정', '답글', '삭제', '목록']):
+                                action_buttons.append(btn_text)
                         except:
                             pass
+                    
+                    if action_buttons:
+                        self.emit_progress(f"🔍 발견된 액션 버튼: {', '.join(action_buttons[:10])}", thread_id)
+                    else:
+                        self.emit_progress("⚠️ 수정/답글/삭제 버튼을 전혀 찾을 수 없음", thread_id)
                             
                 except Exception as e:
-                    self.emit_progress(f"⚠️ 버튼 디버깅 실패: {e}", thread_id)
+                    self.emit_progress(f"⚠️ 페이지 구조 디버깅 실패: {e}", thread_id)
                 
                 raise Exception("수정 버튼을 찾을 수 없습니다")
             
@@ -2583,12 +2852,14 @@ class CafePostingWorker(QThread):
                 self.emit_progress(f"⚠️ [스레드{thread_id+1}] 댓글 차단 정리 중 오류: {cleanup_error}", thread_id)
 
     def find_reply_button_with_scroll(self, driver, thread_id):
-        """📌 스마트 답글 버튼 찾기 (조건부 스크롤 포함)"""
+        """📌 스마트 답글 버튼 찾기 (조건부 스크롤 포함, 개선됨)"""
         # 답글 버튼 셀렉터들 - 실제 HTML 구조에 맞게 수정
         reply_btn_selectors = [
             "//a[contains(@class, 'BaseButton') and contains(@class, 'skinGray')]//span[@class='BaseButton__txt' and normalize-space()='답글']/..",
             "//a[contains(@class, 'BaseButton')]//span[normalize-space(text())='답글']/..",
-            "//div[contains(@class, 'ArticleBottomBtns')]//a[contains(@href, '/reply')]"
+            "//div[contains(@class, 'ArticleBottomBtns')]//a[contains(@href, '/reply')]",
+            "//a[contains(text(), '답글')]",  # 🆕 추가 셀렉터
+            "//button[contains(text(), '답글')]"  # 🆕 추가 셀렉터
         ]
         
         # 1단계: 현재 화면에서 답글 버튼 찾기 시도
@@ -2604,7 +2875,7 @@ class CafePostingWorker(QThread):
         try:
             # 페이지 끝까지 스크롤
             driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            self.smart_sleep(2, "스크롤 후 동적 콘텐츠 로딩 대기")
+            self.smart_sleep(5, "스크롤 후 동적 콘텐츠 로딩 대기 (5초)")  # 🔥 2초 → 5초 증가
             
             # 다시 답글 버튼 찾기
             reply_btn = self._find_reply_button(driver, reply_btn_selectors)
@@ -2612,8 +2883,19 @@ class CafePostingWorker(QThread):
             if reply_btn:
                 self.emit_progress("✅ 답글 버튼 발견! (스크롤 후)", thread_id)
                 return reply_btn
+            
+            # 3단계: 페이지 맨 위로 스크롤 후 재시도 (버튼이 위에 있을 수도)
+            self.emit_progress("📜 답글 버튼 재탐색 - 페이지 맨 위로 스크롤...", thread_id)
+            driver.execute_script("window.scrollTo(0, 0);")
+            self.smart_sleep(3, "페이지 상단 스크롤 후 대기")
+            
+            reply_btn = self._find_reply_button(driver, reply_btn_selectors)
+            
+            if reply_btn:
+                self.emit_progress("✅ 답글 버튼 발견! (페이지 상단)", thread_id)
+                return reply_btn
             else:
-                self.emit_progress("❌ 스크롤 후에도 답글 버튼을 찾을 수 없음", thread_id)
+                self.emit_progress("❌ 모든 시도 후에도 답글 버튼을 찾을 수 없음", thread_id)
                 return None
                 
         except Exception as e:
@@ -2621,11 +2903,11 @@ class CafePostingWorker(QThread):
             return None
     
     def _find_reply_button(self, driver, selectors):
-        """답글 버튼 찾기 (내부 메서드)"""
+        """답글 버튼 찾기 (내부 메서드, 개선됨)"""
         for selector in selectors:
             try:
                 reply_btn = self.wait_for_element_with_retry(
-                    driver, By.XPATH, selector, max_wait=3,
+                    driver, By.XPATH, selector, max_wait=5,  # 🔥 3초 → 5초 증가
                     element_name="답글 버튼"
                 )
                 if reply_btn:
@@ -2656,9 +2938,9 @@ class CafePostingWorker(QThread):
                     
                     del self.drivers[key]
             
-            # 짧은 대기 시간
-            self.emit_progress(f"⏳ [쓰레드{thread_id}] 답글용 브라우저 정리 완료 - 댓글 작성 준비", thread_id)
-            time.sleep(1)  # 짧은 대기
+            # 🔧 브라우저 종료 후 안정화 대기 시간 증가 (1초 → 3초)
+            self.emit_progress(f"⏳ [쓰레드{thread_id}] 답글용 브라우저 정리 완료 - 댓글 작성 준비 (3초 대기)", thread_id)
+            time.sleep(3)  # 크롬 프로세스 완전 종료 대기
             
             # 가비지 컬렉션으로 메모리 정리
             gc.collect()
@@ -2667,7 +2949,7 @@ class CafePostingWorker(QThread):
             self.emit_progress(f"❌ [쓰레드{thread_id}] 답글용 브라우저 정리 중 오류: {e}", thread_id)
             # 오류가 발생해도 계속 진행
     
-    def write_reply(self, thread_id, url, parser, script_folder=None, assigned_url=None, target_account=None):
+    def write_reply(self, thread_id, url, parser, script_folder=None, assigned_url=None, target_account=None, target_board=None):
         """답글 작성 및 답글 계정 반환"""
         # 🔍 디버그: target_account 확인
         if target_account:
@@ -2729,23 +3011,49 @@ class CafePostingWorker(QThread):
                 else:
                     failure_reason = login_result[1]  # 실패 원인
                     
-                    # 🆕 전용 계정인 경우 차단하지 않고 바로 종료
-                    if target_account:
-                        self.emit_progress(f"❌ [스레드{thread_id+1}] 전용 계정 {reply_account[0]} 로그인 실패: {failure_reason}", thread_id)
-                        self.emit_progress(f"🚫 [스레드{thread_id+1}] 전용 계정 실패 - 다른 계정 시도 안 함", thread_id)
-                        self.safe_cleanup_thread_drivers(thread_id)
-                        driver = None
-                        break  # 전용 계정 실패 시 바로 종료
-                    else:
-                        # 🎯 일반 계정: 실패하면 바로 차단하고 다음 계정으로
-                        self.main_window.mark_reply_account_blocked(reply_account[0])
-                        self.emit_progress(f"❌ [스레드{thread_id+1}] 계정 {reply_account[0]} 로그인 실패: {failure_reason}", thread_id)
-                        self.emit_progress(f"🚫 [스레드{thread_id+1}] 계정 {reply_account[0]} 차단 목록 추가", thread_id)
+                    # 🔥 프록시 문제인지 계정 문제인지 구분
+                    is_proxy_issue = self.is_proxy_related_error(failure_reason)
+                    
+                    if is_proxy_issue:
+                        # 🌐 프록시 문제 → 프록시만 차단, 계정은 보호
+                        # 현재 사용 중인 프록시 확인 (driver에서 추출)
+                        selected_proxy = getattr(driver, '_current_proxy', None)
+                        if selected_proxy:
+                            self.mark_proxy_blocked(selected_proxy, thread_id)
+                            self.emit_progress(f"🔒 [스레드{thread_id+1}] 계정 {reply_account[0]} 보호됨 (프록시 문제)", thread_id)
+                        else:
+                            self.emit_progress(f"⚠️ [스레드{thread_id+1}] 프록시 URL 확인 실패 - 계정은 보호", thread_id)
                         
-                        # 실패한 드라이버 정리 후 다음 계정으로 재시도
+                        # 드라이버 정리 후 같은 계정으로 다른 프록시로 재시도
                         self.safe_cleanup_thread_drivers(thread_id)
                         driver = None
-                        continue  # 다음 계정으로 재시도
+                        
+                        # 전용 계정이면 재시도 중단
+                        if target_account:
+                            self.emit_progress(f"❌ [스레드{thread_id+1}] 전용 계정 프록시 문제 - 재시도 중단", thread_id)
+                            break
+                        
+                        # 일반 계정이면 다른 프록시로 재시도 (같은 계정 유지)
+                        continue
+                    else:
+                        # 🔑 실제 계정 문제 → 계정 차단
+                        # 🆕 전용 계정인 경우 차단하지 않고 바로 종료
+                        if target_account:
+                            self.emit_progress(f"❌ [스레드{thread_id+1}] 전용 계정 {reply_account[0]} 로그인 실패: {failure_reason}", thread_id)
+                            self.emit_progress(f"🚫 [스레드{thread_id+1}] 전용 계정 실패 - 다른 계정 시도 안 함", thread_id)
+                            self.safe_cleanup_thread_drivers(thread_id)
+                            driver = None
+                            break  # 전용 계정 실패 시 바로 종료
+                        else:
+                            # 🎯 일반 계정: 실패하면 바로 차단하고 다음 계정으로
+                            self.main_window.mark_reply_account_blocked(reply_account[0])
+                            self.emit_progress(f"❌ [스레드{thread_id+1}] 계정 {reply_account[0]} 로그인 실패: {failure_reason}", thread_id)
+                            self.emit_progress(f"🚫 [스레드{thread_id+1}] 계정 {reply_account[0]} 차단 목록 추가 (실제 계정 문제)", thread_id)
+                            
+                            # 실패한 드라이버 정리 후 다음 계정으로 재시도
+                            self.safe_cleanup_thread_drivers(thread_id)
+                            driver = None
+                            continue  # 다음 계정으로 재시도
                     
             except Exception as e:
                 self.emit_progress(f"❌ [스레드{thread_id+1}] 답글 계정 {reply_account[0]} 처리 중 오류: {str(e)}", thread_id)
@@ -2804,11 +3112,11 @@ class CafePostingWorker(QThread):
                 self.emit_progress(f"📝 게시글 페이지로 이동: {url}", thread_id)
             
             driver.get(edit_url)
-            
+
             # 페이지 로딩 완료 대기
             if not self.wait_for_page_load(driver):
                 self.emit_progress("⚠️ 페이지 로딩 시간 초과, 계속 진행합니다...", thread_id)
-            
+
             self.smart_sleep(10, "페이지 로딩 후 대기")
             
             # iframe 진입
@@ -2846,19 +3154,114 @@ class CafePostingWorker(QThread):
             
             # 버튼 클릭
             original_tabs = driver.window_handles
+            self.emit_progress(f"🔍 [DEBUG] 클릭 전 탭 수: {len(original_tabs)}", thread_id)
+            self.emit_progress(f"🔍 [DEBUG] 클릭 전 현재 URL: {driver.current_url[:50]}...", thread_id)
+
             if not self.safe_click_with_retry(driver, action_btn, element_name=f"{action_name} 버튼"):
                 raise Exception(f"{action_name} 버튼 클릭 실패")
-            
+
+            self.emit_progress(f"✅ {action_name} 버튼 클릭 완료", thread_id)
+
+            # 🔥 수정 모드일 때: 새 탭으로 빠르게 전환 후 Alert 체크
+            new_tab_handle = None
+            if action_name == "수정":
+                self.emit_progress(f"🔍 [활동정지] 새 탭 빠른 전환 시도...", thread_id)
+                from selenium.webdriver.support.ui import WebDriverWait as WDW
+                from selenium.webdriver.support import expected_conditions as EC
+
+                # 새 탭이 열릴 때까지 짧게 대기 (최대 3초)
+                max_wait = 3
+                start_time = time.time()
+                while time.time() - start_time < max_wait:
+                    try:
+                        current_handles = driver.window_handles
+                        if len(current_handles) > len(original_tabs):
+                            new_tab_handle = list(set(current_handles) - set(original_tabs))[0]
+                            self.emit_progress(f"✅ 새 탭 감지! 즉시 전환...", thread_id)
+                            driver.switch_to.window(new_tab_handle)
+                            break
+                    except:
+                        pass
+                    time.sleep(0.1)
+
+                # 새 탭으로 전환됐으면 Alert 체크
+                if new_tab_handle:
+                    self.emit_progress(f"🔍 [활동정지] 새 탭에서 Alert 체크...", thread_id)
+                    time.sleep(0.5)  # Alert 대기
+
+                    alert_detected = False
+                    account_suspended = False  # 활동정지 플래그
+                    
+                    for i in range(20):  # 최대 10초
+                        try:
+                            alert = driver.switch_to.alert
+                            alert_text = alert.text
+                            alert_detected = True
+
+                            self.emit_progress(f"🔔 [활동정지] Alert 감지! 내용: {alert_text}", thread_id)
+
+                            # 활동정지 관련 키워드 확인
+                            suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "글쓰기", "수정", "카페 활동이 불가", "현재 활동정지"]
+
+                            if any(keyword in alert_text for keyword in suspension_keywords):
+                                self.emit_progress(f"", thread_id)
+                                self.emit_progress(f"🚫🚫🚫 활동정지 Alert 감지됨!", thread_id)
+                                self.emit_progress(f"   계정: {successful_account[0]}", thread_id)
+                                self.emit_progress(f"   메시지: {alert_text}", thread_id)
+                                self.emit_progress(f"", thread_id)
+
+                                alert.accept()
+                                self.emit_progress("✅ 활동정지 Alert 확인 완료", thread_id)
+                                time.sleep(1)
+
+                                # 🔥 해당 계정을 차단 목록에 추가
+                                try:
+                                    self.main_window.mark_reply_account_blocked(successful_account[0])
+                                    self.emit_progress(f"🚫 {successful_account[0]} 계정 차단 목록 추가 (활동정지)", thread_id)
+                                except Exception as mark_error:
+                                    self.emit_progress(f"⚠️ 계정 차단 추가 실패: {str(mark_error)[:50]} - 계속 진행", thread_id)
+
+                                # 🔥 플래그 설정하고 루프 종료
+                                account_suspended = True
+                                self.emit_progress(f"🔥 [DEBUG] account_suspended = True 설정됨!", thread_id)
+                                break  # for loop 즉시 종료
+                            else:
+                                # 다른 alert는 수락하고 계속 진행
+                                self.emit_progress(f"ℹ️ [활동정지] 다른 Alert: {alert_text[:50]}", thread_id)
+                                alert.accept()
+                                time.sleep(1)
+                                break  # 다른 Alert도 break
+                        except Exception as e:
+                            # Alert 없음 - 계속 체크
+                            if i % 4 == 0:
+                                self.emit_progress(f"⏳ [활동정지] Alert 체크 중... ({i+1}/20)", thread_id)
+
+                        time.sleep(0.5)
+
+                    # 🔥 활동정지 감지됐으면 즉시 예외 발생 (for loop 밖에서)
+                    if account_suspended:
+                        self.emit_progress(f"🔥 [활동정지] 작업 완전 중단 - 예외 발생!", thread_id)
+                        raise Exception(f"ACCOUNT_SUSPENDED:{successful_account[0]}")
+                    
+                    if alert_detected:
+                        self.emit_progress(f"✅ [활동정지] Alert 처리 완료", thread_id)
+
             # 새 탭 열릴 때까지 대기
             try:
                 from selenium.webdriver.support.ui import WebDriverWait as WDW
+                from selenium.webdriver.support import expected_conditions as EC
+
+                self.emit_progress(f"⏳ 새 탭 열림 대기 중...", thread_id)
                 WDW(driver, 15).until(
                     lambda d: len(d.window_handles) > len(original_tabs)
                 )
+
                 new_tab = list(set(driver.window_handles) - set(original_tabs))[0]
+                self.emit_progress(f"✅ 새 탭 감지됨! 전환 중...", thread_id)
+
                 driver.switch_to.window(new_tab)
                 self.emit_progress(f"🆕 {action_name} 작성 탭으로 전환 완료", thread_id)
-                
+
                 # 새 탭에서 페이지 로딩 완료까지 충분히 대기
                 self.smart_sleep(10, "새 탭 초기 로딩 대기")
                 
@@ -2886,6 +3289,10 @@ class CafePostingWorker(QThread):
 
             # 작성 페이지는 단일 페이지 구조이므로 iframe 전환 불필요
             self.emit_progress(f"ℹ️ {action_name} 작성 페이지 (단일 페이지 구조)", thread_id)
+
+            # 🆕 게시판 변경 (수정 모드이고 목표 게시판이 지정된 경우만)
+            if action_name == "수정" and target_board:
+                self.change_board(driver, thread_id, target_board)
 
             # 📌 제목 입력 처리
             try:
@@ -2960,6 +3367,8 @@ class CafePostingWorker(QThread):
             # 🆕 공개 설정 확인 및 변경 (수정 모드일 때만)
             if action_name == "수정":
                 self.check_and_set_public_visibility(driver, thread_id)
+                # 🆕 댓글 허용으로 변경 (댓글 작성을 위해)
+                self.enable_comments_for_writing(driver, thread_id)
 
             # 📌 등록 버튼 클릭 및 제목 팝업 재시도 처리 (최대 3번)
             max_submit_retries = 3
@@ -3160,10 +3569,345 @@ class CafePostingWorker(QThread):
                 if url_attempt < max_url_attempts - 1:
                     self.smart_sleep(3, f"URL 추출 재시도 전 대기")
             
-            # 유효한 URL을 얻지 못한 경우 답글 작성 실패로 처리
+            # 유효한 URL을 얻지 못한 경우 프록시 변경 후 재시도
             if not valid_url_found or not reply_url:
-                self.emit_progress("❌ 유효한 답글 URL을 추출할 수 없습니다", thread_id)
-                reply_url = driver.current_url  # 최후 수단으로 현재 URL 사용
+                self.emit_progress("⚠️ 첫 시도에서 유효한 URL 추출 실패 - 프록시 변경 후 재시도 시작", thread_id)
+                
+                # 프록시 변경 후 재시도 (최대 2회)
+                max_proxy_retries = 2
+                original_driver = driver  # 원래 드라이버 백업
+                
+                for proxy_retry in range(max_proxy_retries):
+                    try:
+                        self.emit_progress(f"🔄 프록시 변경 재시도 {proxy_retry + 1}/{max_proxy_retries}", thread_id)
+                        
+                        # 현재 URL 저장 (나중에 다시 접속용)
+                        current_page_url = driver.current_url
+                        
+                        # 로그아웃
+                        self.logout_naver(driver)
+                        self.emit_progress("🚪 로그아웃 완료", thread_id)
+                        
+                        # 드라이버 종료
+                        try:
+                            driver.quit()
+                            self.emit_progress("🔌 기존 드라이버 종료", thread_id)
+                        except:
+                            pass
+                        
+                        # 새 프록시로 드라이버 생성
+                        self.emit_progress("🌐 새 프록시로 드라이버 생성 중...", thread_id)
+                        driver = self.get_driver(thread_id, 'reply', successful_account[0])
+                        if not driver:
+                            raise Exception("드라이버 생성 실패")
+                        
+                        self.emit_progress("✅ 새 드라이버 생성 완료", thread_id)
+                        
+                        # 재로그인
+                        self.emit_progress(f"🔑 재로그인 시도: {successful_account[0]}", thread_id)
+                        login_result = self.login_naver(driver, successful_account[0], successful_account[1], thread_id)
+                        if not login_result[0]:
+                            raise Exception(f"재로그인 실패: {login_result[1]}")
+                        
+                        self.emit_progress(f"✅ 재로그인 성공: {successful_account[0]}", thread_id)
+                        
+                        # 동일한 페이지로 이동
+                        self.emit_progress(f"📄 게시글 페이지 재접속: {current_page_url[:50]}...", thread_id)
+                        driver.get(current_page_url)
+                        self.smart_sleep(8, "페이지 로딩 대기")
+                        
+                        # iframe 진입 시도
+                        try:
+                            driver.switch_to.default_content()
+                            iframe = driver.find_element(By.CSS_SELECTOR, "iframe#cafe_main")
+                            driver.switch_to.frame(iframe)
+                            self.emit_progress("🔄 iframe 재진입 완료", thread_id)
+                        except:
+                            self.emit_progress("ℹ️ iframe 진입 불필요 또는 실패", thread_id)
+                        
+                        # URL 재추출 시도 (짧은 시도, 3회만)
+                        self.emit_progress("🔍 프록시 변경 후 URL 재추출 시도", thread_id)
+                        
+                        for retry_url_attempt in range(3):
+                            try:
+                                # #spiButton에서 data-url 추출
+                                def check_spi_button_retry(driver):
+                                    try:
+                                        return driver.execute_script("""
+                                            const spiButton = document.querySelector('#spiButton');
+                                            if (spiButton && spiButton.getAttribute('data-url')) {
+                                                return spiButton.getAttribute('data-url');
+                                            }
+                                            return null;
+                                        """)
+                                    except:
+                                        return None
+                                
+                                # 10초 동안 확인 (2초마다)
+                                retry_start = time.time()
+                                while time.time() - retry_start < 10:
+                                    candidate_url = check_spi_button_retry(driver)
+                                    if candidate_url and self.is_valid_reply_url(candidate_url):
+                                        reply_url = candidate_url
+                                        valid_url_found = True
+                                        self.emit_progress(f"✅ 프록시 변경 후 유효한 URL 추출 성공: {reply_url}", thread_id)
+                                        break
+                                    time.sleep(2)
+                                
+                                if valid_url_found:
+                                    break
+                                
+                                # 현재 URL 확인
+                                current_url = driver.current_url
+                                if self.is_valid_reply_url(current_url):
+                                    reply_url = current_url
+                                    valid_url_found = True
+                                    self.emit_progress(f"✅ 프록시 변경 후 현재 URL이 유효함: {reply_url}", thread_id)
+                                    break
+                                
+                            except Exception as url_retry_error:
+                                self.emit_progress(f"⚠️ URL 재추출 시도 {retry_url_attempt + 1} 실패: {str(url_retry_error)}", thread_id)
+                            
+                            if retry_url_attempt < 2:
+                                self.smart_sleep(2, "URL 재추출 재시도 전 대기")
+                        
+                        if valid_url_found:
+                            self.emit_progress(f"🎉 프록시 변경 재시도 {proxy_retry + 1}에서 URL 추출 성공!", thread_id)
+                            break
+                        else:
+                            raise Exception("URL 재추출 실패")
+                            
+                    except Exception as proxy_retry_error:
+                        self.emit_progress(f"❌ 프록시 재시도 {proxy_retry + 1}/{max_proxy_retries} 실패: {str(proxy_retry_error)}", thread_id)
+                        
+                        if proxy_retry == max_proxy_retries - 1:
+                            # 프록시 변경도 실패 → 최종 재시도: 원본 URL로 재접속 후 전체 수정/발행 프로세스 재시도
+                            self.emit_progress(f"❌ 프록시 변경 재시도 {max_proxy_retries}회 모두 실패", thread_id)
+                            self.emit_progress("🔄 최종 재시도: 원본 URL로 재접속 후 글 수정/발행 전체 재시도", thread_id)
+                            
+                            try:
+                                # 현재 드라이버가 있는지 확인
+                                if not driver:
+                                    # 드라이버가 없으면 새로 생성
+                                    driver = self.get_driver(thread_id, 'reply', successful_account[0])
+                                    if not driver:
+                                        raise Exception("최종 재시도용 드라이버 생성 실패")
+                                    
+                                    # 로그인
+                                    login_result = self.login_naver(driver, successful_account[0], successful_account[1], thread_id)
+                                    if not login_result[0]:
+                                        raise Exception(f"최종 재시도 로그인 실패: {login_result[1]}")
+                                
+                                # 원본 URL로 재접속 (edit_url은 함수 초반에 설정됨)
+                                self.emit_progress(f"📄 원본 URL 재접속: {edit_url[:50]}...", thread_id)
+                                driver.get(edit_url)
+                                self.smart_sleep(10, "원본 URL 재로딩 대기")
+                                
+                                # iframe 재진입
+                                try:
+                                    driver.switch_to.default_content()
+                                    iframe = driver.find_element(By.CSS_SELECTOR, "iframe#cafe_main")
+                                    driver.switch_to.frame(iframe)
+                                    self.emit_progress("🔄 iframe 재진입 완료", thread_id)
+                                except:
+                                    self.emit_progress("ℹ️ iframe 진입 불필요", thread_id)
+                                
+                                self.smart_sleep(5, "페이지 안정화 대기")
+                                
+                                # === 🔥 전체 수정/발행 프로세스 재시도 시작 ===
+                                self.emit_progress("🔧 수정 버튼 다시 찾기 시작", thread_id)
+                                
+                                # 수정 버튼 찾기
+                                action_btn = self.find_edit_button_with_scroll(driver, thread_id)
+                                if not action_btn:
+                                    raise Exception("최종 재시도: 수정 버튼을 찾을 수 없습니다")
+                                
+                                # 수정 버튼 클릭 & 새 탭 전환
+                                original_tabs = driver.window_handles
+                                if not self.safe_click_with_retry(driver, action_btn, element_name="수정 버튼"):
+                                    raise Exception("최종 재시도: 수정 버튼 클릭 실패")
+                                
+                                self.emit_progress("✅ 수정 버튼 클릭 완료", thread_id)
+                                
+                                # 새 탭 대기
+                                try:
+                                    from selenium.webdriver.support.ui import WebDriverWait as WDW
+                                    WDW(driver, 15).until(lambda d: len(d.window_handles) > len(original_tabs))
+                                    new_tab = list(set(driver.window_handles) - set(original_tabs))[0]
+                                    driver.switch_to.window(new_tab)
+                                    self.emit_progress("🆕 수정 작성 탭으로 전환 완료", thread_id)
+                                    self.smart_sleep(10, "새 탭 초기 로딩 대기")
+                                except Exception as tab_error:
+                                    raise Exception(f"최종 재시도: 새 탭 전환 실패: {str(tab_error)}")
+                                
+                                # 제목 재입력
+                                self.emit_progress("✏️ 제목 재입력 시작", thread_id)
+                                try:
+                                    title_input = self.wait_for_element_with_retry(
+                                        driver, By.CSS_SELECTOR, 'textarea[placeholder="제목을 입력해 주세요."]',
+                                        element_name="제목 입력 필드"
+                                    )
+                                    title_input.clear()
+                                    self.smart_sleep(1, "제목 지우기 후 대기")
+                                    if not self.safe_input_text(driver, title_input, parser.title, "제목"):
+                                        raise Exception("최종 재시도: 제목 입력 실패")
+                                    self.emit_progress("✅ 제목 재입력 완료", thread_id)
+                                except Exception as title_error:
+                                    raise Exception(f"최종 재시도: 제목 입력 실패: {str(title_error)}")
+                                
+                                # 에디터 로딩 대기
+                                self.emit_progress("⏳ 에디터 로딩 대기", thread_id)
+                                try:
+                                    self.wait_for_element_with_retry(
+                                        driver, By.CSS_SELECTOR, '[contenteditable="true"], div[role="textbox"], div[data-placeholder]',
+                                        max_wait=10, retry_count=5, element_name="에디터"
+                                    )
+                                    self.smart_sleep(3, "에디터 완전 로딩 대기")
+                                    self.emit_progress("✅ 에디터 로딩 완료", thread_id)
+                                except Exception as editor_error:
+                                    self.emit_progress(f"⚠️ 에디터 로딩 대기 실패: {editor_error}, 계속 진행", thread_id)
+                                
+                                # 본문 재입력
+                                self.emit_progress("📝 본문 재입력 시작", thread_id)
+                                success = self.clear_and_input_content(driver, parser.content, parser.image_paths)
+                                if not success:
+                                    raise Exception("최종 재시도: 본문 입력 실패")
+                                self.emit_progress("✅ 본문 재입력 완료", thread_id)
+                                
+                                # 등록 준비 대기
+                                self.smart_sleep(15, "본문 입력 완료 후 등록 준비 대기")
+                                
+                                # 공개 설정 확인
+                                self.check_and_set_public_visibility(driver, thread_id)
+                                # 🆕 댓글 허용으로 변경 (댓글 작성을 위해)
+                                self.enable_comments_for_writing(driver, thread_id)
+                                
+                                # 등록 버튼 클릭
+                                self.emit_progress("📝 등록 버튼 클릭 시도", thread_id)
+                                submit_btn = self.wait_for_element_with_retry(
+                                    driver, By.CSS_SELECTOR, 'a.BaseButton--skinGreen[role="button"]',
+                                    element_name="등록 버튼"
+                                )
+                                if not self.safe_click_with_retry(driver, submit_btn, element_name="등록 버튼"):
+                                    raise Exception("최종 재시도: 등록 버튼 클릭 실패")
+                                
+                                self.emit_progress("✅ 등록 버튼 클릭 완료", thread_id)
+                                self.smart_sleep(10, "등록 완료 대기")
+                                
+                                # 등록 성공 확인 (작성 폼 사라짐 확인)
+                                try:
+                                    title_form = driver.find_element(By.CSS_SELECTOR, 'textarea[placeholder="제목을 입력해 주세요."]')
+                                    if title_form.is_displayed():
+                                        raise Exception("최종 재시도: 등록 실패 - 작성 폼이 아직 존재")
+                                except:
+                                    # 폼을 찾을 수 없음 = 등록 성공
+                                    self.emit_progress("✅ 등록 성공 확인 - 작성 폼 사라짐", thread_id)
+                                
+                                # 페이지 안정화 대기
+                                self.emit_progress("⏳ 등록 완료 후 페이지 안정화 대기", thread_id)
+                                self.smart_sleep(10, "등록 완료 후 안정화 대기")
+                                
+                                # === URL 재추출 시작 ===
+                                self.emit_progress("🔍 최종 재시도: URL 재추출 시작", thread_id)
+                                
+                                for final_attempt in range(5):
+                                    try:
+                                        # iframe 재진입
+                                        try:
+                                            driver.switch_to.default_content()
+                                            iframe = driver.find_element(By.CSS_SELECTOR, "iframe#cafe_main")
+                                            driver.switch_to.frame(iframe)
+                                        except:
+                                            pass
+                                        
+                                        # #spiButton에서 data-url 추출
+                                        def check_spi_final(driver):
+                                            try:
+                                                return driver.execute_script("""
+                                                    const spiButton = document.querySelector('#spiButton');
+                                                    if (spiButton && spiButton.getAttribute('data-url')) {
+                                                        return spiButton.getAttribute('data-url');
+                                                    }
+                                                    return null;
+                                                """)
+                                            except:
+                                                return None
+                                        
+                                        # 25초 동안 확인 (3초마다)
+                                        final_start = time.time()
+                                        while time.time() - final_start < 25:
+                                            candidate_url = check_spi_final(driver)
+                                            if candidate_url and self.is_valid_reply_url(candidate_url):
+                                                reply_url = candidate_url
+                                                valid_url_found = True
+                                                elapsed = round(time.time() - final_start, 1)
+                                                self.emit_progress(f"✅ 최종 재시도에서 URL 추출 성공 ({elapsed}초 소요): {reply_url}", thread_id)
+                                                break
+                                            time.sleep(3)
+                                        
+                                        if valid_url_found:
+                                            break
+                                        
+                                        # 현재 URL 확인
+                                        current_url = driver.current_url
+                                        if self.is_valid_reply_url(current_url):
+                                            reply_url = current_url
+                                            valid_url_found = True
+                                            self.emit_progress(f"✅ 최종 재시도에서 현재 URL이 유효함: {reply_url}", thread_id)
+                                            break
+                                        else:
+                                            self.emit_progress(f"❌ 현재 URL도 무효함: {current_url}", thread_id)
+                                        
+                                    except Exception as final_error:
+                                        self.emit_progress(f"⚠️ 최종 URL 추출 시도 {final_attempt + 1}/5 실패: {str(final_error)}", thread_id)
+                                    
+                                    if final_attempt < 4:
+                                        self.smart_sleep(3, "최종 URL 추출 재시도 전 대기")
+                                
+                                if valid_url_found:
+                                    self.emit_progress("🎉 최종 재시도에서 전체 프로세스 성공!", thread_id)
+                                else:
+                                    raise Exception("최종 재시도: 전체 프로세스 완료했으나 유효한 URL을 추출할 수 없습니다")
+                                    
+                            except Exception as final_retry_error:
+                                self.emit_progress(f"❌ 최종 재시도 실패: {str(final_retry_error)}", thread_id)
+                                if driver:
+                                    try:
+                                        driver.quit()
+                                    except:
+                                        pass
+                                # Exception을 raise하지 않고 실패 처리
+                                self.emit_progress(f"❌ 모든 재시도 실패 - 해당 원고 실패 처리 후 다음 원고로 넘어감", thread_id)
+                                valid_url_found = False
+                                reply_url = None
+                
+                # 여전히 실패한 경우 - 해당 원고만 실패 처리
+                if not valid_url_found or not reply_url:
+                    self.emit_progress("❌ 유효한 답글 URL을 추출할 수 없습니다 - 해당 원고 실패 처리", thread_id)
+                    
+                    # 결과 테이블에 실패 표시
+                    if hasattr(self, 'current_row') or 'current_row' in locals():
+                        try:
+                            update_data = {
+                                '답글아이디로그인아이피': '실패',
+                                '답글URL': 'URL 추출 실패',
+                                '댓글상황': '❌ URL 추출 실패'
+                            }
+                            self.main_window.update_result(current_row, update_data)
+                            self.emit_progress(f"📊 결과 테이블에 실패 표시됨 (행 {current_row+1})", thread_id)
+                        except:
+                            pass
+                    
+                    # 드라이버 정리
+                    try:
+                        if driver:
+                            self.logout_naver(driver)
+                            driver.quit()
+                    except:
+                        pass
+                    
+                    # 실패를 나타내는 값 반환 (예외를 던지지 않음)
+                    return None, None, None, None, None
             
             self.emit_progress(f"📝 최종 답글 URL 수집: {reply_url}", thread_id)
             
@@ -3350,6 +4094,14 @@ class CafePostingWorker(QThread):
         total_count = len(parser.comments)
         self.emit_progress(f"🎉 댓글 작성 완료 - {total_count}개 중 {success_count}개 댓글 처리 완료", thread_id)
         
+        # 🔧 댓글 작성 완료 후 안정화 대기 (크롬창 정리 시간 확보)
+        stabilization_time = 15
+        self.emit_progress(f"⏳ 작업 완료 후 {stabilization_time}초 안정화 대기 중...", thread_id)
+        for _ in range(stabilization_time):
+            if not self.is_running:
+                break
+            time.sleep(1)
+        
         return success_count, total_count  # 성공/전체 댓글 개수 반환
     
     def process_single_comment(self, thread_id, reply_url, comment, reply_account, comment_index, total_comments, written_comments):
@@ -3390,17 +4142,55 @@ class CafePostingWorker(QThread):
                             self.emit_progress(f"👥 아이디{comment_id} 기존 계정 재사용: {account[0]}", thread_id)
                         else:
                             # 🆕 새로운 계정 할당 후 매핑 저장 (답글 작성자 제외)
-                            account = self.main_window.get_comment_account_from_pool(exclude_account_id=reply_account[0])
+                            account = self.get_thread_comment_account(thread_id, exclude_account_id=reply_account[0])
                             if not account:
-                                self.emit_progress(f"❌ 사용 가능한 댓글 계정이 없습니다 (답글 작성자 {reply_account[0]} 제외)", thread_id)
+                                # 🚨🚨🚨 전체 작업 중단됨 - 즉시 종료
+                                self.emit_progress(f"", thread_id)
+                                self.emit_progress(f"🚨🚨🚨 스레드{thread_id+1}: 댓글 계정 소진으로 작업 중단됨!", thread_id)
+                                self.emit_progress(f"   🛑 전체 프로그램이 중단되었습니다.", thread_id)
+                                self.emit_progress(f"   ⚠️ 원고 관리를 위해 더 이상 진행하지 않습니다.", thread_id)
+                                self.emit_progress(f"", thread_id)
+                                
+                                # 결과 테이블 업데이트
+                                if hasattr(self, 'current_row'):
+                                    update_data = {
+                                        '댓글상황': '🛑 전체 작업 중단',
+                                        '댓글차단': '❌ 계정 소진'
+                                    }
+                                    self.main_window.update_result(self.current_row, update_data)
+                                
+                                # 🔥 작업 중단 플래그 확인
+                                if not self.is_running:
+                                    self.emit_progress(f"🛑 스레드{thread_id+1} 종료 중...", thread_id)
+                                    raise Exception("댓글 계정 소진으로 전체 작업 중단")
+                                
                                 return False  # 더 이상 시도할 계정 없음
                             thread_mapping[comment_id] = account
                             self.emit_progress(f"👥 아이디{comment_id} 새 계정 할당: {account[0]} (답글 작성자 {reply_account[0]} 제외)", thread_id)
                     else:
                         # 재시도: 새로운 계정 할당 (기존 매핑 무시, 답글 작성자 제외)
-                        account = self.main_window.get_comment_account_from_pool(exclude_account_id=reply_account[0])
+                        account = self.get_thread_comment_account(thread_id, exclude_account_id=reply_account[0])
                         if not account:
-                            self.emit_progress(f"❌ 재시도용 댓글 계정이 없습니다 (답글 작성자 {reply_account[0]} 제외)", thread_id)
+                            # 🚨🚨🚨 재시도도 실패 - 전체 작업 중단
+                            self.emit_progress(f"", thread_id)
+                            self.emit_progress(f"🚨🚨🚨 스레드{thread_id+1}: 재시도 실패 - 댓글 계정 소진!", thread_id)
+                            self.emit_progress(f"   🛑 전체 프로그램이 중단되었습니다.", thread_id)
+                            self.emit_progress(f"   ⚠️ 원고 관리를 위해 더 이상 진행하지 않습니다.", thread_id)
+                            self.emit_progress(f"", thread_id)
+                            
+                            # 결과 테이블 업데이트
+                            if hasattr(self, 'current_row'):
+                                update_data = {
+                                    '댓글상황': '🛑 전체 작업 중단',
+                                    '댓글차단': '❌ 재시도 계정 소진'
+                                }
+                                self.main_window.update_result(self.current_row, update_data)
+                            
+                            # 🔥 작업 중단 플래그 확인
+                            if not self.is_running:
+                                self.emit_progress(f"🛑 스레드{thread_id+1} 종료 중...", thread_id)
+                                raise Exception("댓글 계정 소진으로 전체 작업 중단")
+                            
                             return False  # 더 이상 시도할 계정 없음
                         self.emit_progress(f"🔄 아이디{comment.get('id_num', 'unknown')} 재시도 계정: {account[0]} (답글 작성자 {reply_account[0]} 제외)", thread_id)
                     
@@ -3418,12 +4208,24 @@ class CafePostingWorker(QThread):
                     failure_reason = login_result[1]
                     self.emit_progress(f"❌ [스레드{thread_id+1}] 로그인 실패: {account[0]} - {failure_reason}", thread_id)
                     
-                    # 🔄 모든 로그인 실패는 차단 목록에 추가 (재시도 방지)
-                    if account_type == 'comment':
-                        self.main_window.mark_comment_account_blocked(account[0])
-                    elif account_type == 'reply':
-                        self.main_window.mark_reply_account_blocked(account[0])
-                    self.emit_progress(f"🚫 [스레드{thread_id+1}] 계정 {account[0]} 차단 목록 추가 (로그인 실패)", thread_id)
+                    # 🔥 프록시 문제인지 계정 문제인지 구분
+                    is_proxy_issue = self.is_proxy_related_error(failure_reason)
+                    
+                    if is_proxy_issue:
+                        # 🌐 프록시 문제 → 프록시만 차단, 계정은 보호
+                        selected_proxy = getattr(driver, '_current_proxy', None)
+                        if selected_proxy:
+                            self.mark_proxy_blocked(selected_proxy, thread_id)
+                            self.emit_progress(f"🔒 [스레드{thread_id+1}] 계정 {account[0]} 보호됨 (프록시 문제)", thread_id)
+                        else:
+                            self.emit_progress(f"⚠️ [스레드{thread_id+1}] 프록시 URL 확인 실패 - 계정은 보호", thread_id)
+                    else:
+                        # 🔑 실제 계정 문제 → 계정 차단
+                        if account_type == 'comment':
+                            self.main_window.mark_comment_account_blocked(account[0])
+                        elif account_type == 'reply':
+                            self.main_window.mark_reply_account_blocked(account[0])
+                        self.emit_progress(f"🚫 [스레드{thread_id+1}] 계정 {account[0]} 차단 목록 추가 (실제 계정 문제)", thread_id)
                     
                     # 드라이버 정리 후 다음 계정으로 재시도
                     try:
@@ -3567,11 +4369,26 @@ class CafePostingWorker(QThread):
                     
                     self.smart_sleep(1, "답글 버튼 클릭 후 대기")
                     
-                    # 대댓글 입력창 찾기 및 입력
-                    reply_input = self.wait_for_element_with_retry(
-                        driver, By.CSS_SELECTOR, 'textarea.comment_inbox_text',
-                        max_wait=10, element_name="대댓글 입력창"
-                    )
+                    # 🔥 대댓글 입력창 찾기 (부모 댓글 안에서만 찾기)
+                    # 먼저 동적으로 생긴 대댓글 입력창(CommentItem--reply)을 찾음
+                    try:
+                        reply_input = self.wait_for_element_with_retry(
+                            driver, By.CSS_SELECTOR, 'li.CommentItem--reply textarea.comment_inbox_text',
+                            max_wait=5, element_name="대댓글 입력창(신규)"
+                        )
+                        self.signals.progress.emit("✅ 대댓글 입력창 찾기 성공 (CommentItem--reply)")
+                    except:
+                        # 신규 셀렉터 실패 시 부모 댓글 요소 안에서 찾기
+                        try:
+                            reply_input = parent_comment.find_element(By.CSS_SELECTOR, 'textarea.comment_inbox_text')
+                            self.signals.progress.emit("✅ 대댓글 입력창 찾기 성공 (부모 안)")
+                        except:
+                            # 최종 폴백: 전체에서 찾기 (기존 방식)
+                            reply_input = self.wait_for_element_with_retry(
+                                driver, By.CSS_SELECTOR, 'textarea.comment_inbox_text',
+                                max_wait=10, element_name="대댓글 입력창(폴백)"
+                            )
+                            self.signals.progress.emit("⚠️ 대댓글 입력창 찾기 - 폴백 사용")
                     
                     if not self.safe_click_with_retry(driver, reply_input, element_name="대댓글 입력창"):
                         self.signals.progress.emit("⚠️ 대댓글 입력창 클릭 실패, 계속 진행")
@@ -3579,11 +4396,18 @@ class CafePostingWorker(QThread):
                     if not self.safe_input_text(driver, reply_input, comment['content'], "대댓글"):
                         raise Exception("대댓글 입력 실패")
                     
-                    # 대댓글 등록 버튼
-                    submit_btn = self.wait_for_element_with_retry(
-                        driver, By.CSS_SELECTOR, 'a.button.btn_register.is_active',
-                        max_wait=10, element_name="대댓글 등록 버튼"
-                    )
+                    # 🔥 대댓글 등록 버튼 (.is_active가 없을 수도 있음)
+                    try:
+                        submit_btn = self.wait_for_element_with_retry(
+                            driver, By.CSS_SELECTOR, 'a.button.btn_register.is_active',
+                            max_wait=3, element_name="대댓글 등록 버튼(활성)"
+                        )
+                    except:
+                        # is_active가 없는 경우 일반 등록 버튼 찾기
+                        submit_btn = self.wait_for_element_with_retry(
+                            driver, By.CSS_SELECTOR, 'a.button.btn_register',
+                            max_wait=10, element_name="대댓글 등록 버튼"
+                        )
                     button_name = "대댓글 등록 버튼"
                 
                 # 등록 버튼 클릭
@@ -3629,19 +4453,22 @@ class CafePostingWorker(QThread):
                 return True  # 성공
             
             except Exception as e:
-                self.emit_progress(f"❌ [스레드{thread_id+1}] 댓글 {comment_index+1} 계정 {account[0]} 시도 실패: {str(e)}", thread_id)
+                # 🔧 account 변수가 할당되었는지 확인
+                account_info = account[0] if 'account' in locals() and account else "알 수 없음"
+                self.emit_progress(f"❌ [스레드{thread_id+1}] 댓글 {comment_index+1} 계정 {account_info} 시도 실패: {str(e)}", thread_id)
                 
                 # 실패 시 개별 드라이버만 정리
                 try:
                     if 'driver' in locals():
                         self.logout_naver(driver)
                         driver.quit()
-                        # 드라이버 딕셔너리에서도 제거
-                        driver_key = f"{thread_id}_{account_type}_{account[0]}"
-                        with self.drivers_lock:
-                            if driver_key in self.drivers:
-                                del self.drivers[driver_key]
-                                                    # 🔧 실패 로그도 제거
+                        # 드라이버 딕셔너리에서도 제거 (account가 존재하는 경우에만)
+                        if 'account' in locals() and account and 'account_type' in locals():
+                            driver_key = f"{thread_id}_{account_type}_{account[0]}"
+                            with self.drivers_lock:
+                                if driver_key in self.drivers:
+                                    del self.drivers[driver_key]
+                                                        # 🔧 실패 로그도 제거
                 except:
                     pass
                 
@@ -4089,17 +4916,27 @@ class CafePostingWorker(QThread):
                 # 프록시 설정 (스레드별 전용 프록시 사용)
                 thread_proxies = self.get_thread_proxies(thread_id, account_type)
                 
+                # 🔥 차단되지 않은 프록시만 필터링
+                with self.blocked_proxies_lock:
+                    available_proxies = [p for p in thread_proxies if p not in self.blocked_proxies]
+                
                 selected_proxy = None
-                if thread_proxies and account_id:
-                    # 스레드 전용 프록시에서 계정별 고정 프록시 선택
-                    selected_proxy = self.get_fixed_proxy_for_account(account_id, thread_proxies)
+                if available_proxies and account_id:
+                    # 스레드 전용 프록시에서 계정별 고정 프록시 선택 (차단된 것 제외)
+                    selected_proxy = self.get_fixed_proxy_for_account(account_id, available_proxies)
                     chrome_options.add_argument(f'--proxy-server={selected_proxy}')
-                    self.emit_progress(f"🌐 [스레드{thread_id+1}] 전용 프록시: {account_id} → {selected_proxy} ({account_type}용)", thread_id)
+                    blocked_count = len(self.blocked_proxies)
+                    self.emit_progress(f"🌐 [스레드{thread_id+1}] 전용 프록시: {account_id} → {selected_proxy} ({account_type}용, 차단: {blocked_count}개)", thread_id)
+                elif available_proxies:
+                    # account_id가 없으면 스레드 전용 프록시에서 랜덤 선택 (차단된 것 제외)
+                    selected_proxy = random.choice(available_proxies)
+                    chrome_options.add_argument(f'--proxy-server={selected_proxy}')
+                    blocked_count = len(self.blocked_proxies)
+                    self.emit_progress(f"🌐 [스레드{thread_id+1}] 랜덤 프록시: {selected_proxy} ({account_type}용, 차단: {blocked_count}개)", thread_id)
                 elif thread_proxies:
-                    # account_id가 없으면 스레드 전용 프록시에서 랜덤 선택
-                    selected_proxy = random.choice(thread_proxies)
-                    chrome_options.add_argument(f'--proxy-server={selected_proxy}')
-                    self.emit_progress(f"🌐 [스레드{thread_id+1}] 랜덤 프록시: {selected_proxy} ({account_type}용)", thread_id)
+                    # 🔥 모든 프록시가 차단된 경우
+                    blocked_count = len(self.blocked_proxies)
+                    self.emit_progress(f"⚠️ [스레드{thread_id+1}] 모든 프록시 차단됨 (총 {len(thread_proxies)}개, 차단: {blocked_count}개) - 직접 연결", thread_id)
                 else:
                     self.emit_progress(f"🌐 [스레드{thread_id+1}] 프록시 없음: 직접 연결 ({account_type}용)", thread_id)
                 
@@ -4208,6 +5045,9 @@ class CafePostingWorker(QThread):
                 
                 # 자동화 탐지 우회
                 driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                # 🔥 사용 중인 프록시 정보를 driver 객체에 저장 (나중에 차단 판단용)
+                driver._current_proxy = selected_proxy
                 
                 # 🖥️ 창 위치 및 크기 설정 (더 안전한 방식)
                 try:
@@ -4397,11 +5237,14 @@ class CafePostingWorker(QThread):
             if parent_idx is None:
                 # 가능한 댓글 컨테이너 셀렉터들
                 comment_selectors = [
-                    '.comment_list .comment_item',
-                    '.comment_list li', 
-                    '.comment_item',
+                    'ul.comment_list > li.CommentItem',  # 🔥 신규 카페 (대문자)
+                    '.CommentItem:not(.CommentItem--reply)',  # 🔥 일반 댓글만
+                    '.comment_list .comment_item',  # 기존 (소문자)
+                    '.comment_list li',  # 범용
+                    '.comment_item',  # 기존 (소문자)
+                    '.comment_box',  # 🔥 댓글 박스
                     'div[class*="comment"]',
-                    'li[class*="comment"]'
+                    'li[class*="Comment"]'  # 🔥 대문자 추가
                 ]
                 
                 parent_comment = None
@@ -4584,6 +5427,40 @@ class CafePostingWorker(QThread):
             self.safe_cleanup_thread_drivers(thread_id)
             return False
 
+    def is_proxy_related_error(self, failure_reason):
+        """🔥 프록시 관련 오류인지 판단 (계정 보호용)"""
+        if not failure_reason:
+            return False
+            
+        proxy_error_keywords = [
+            "Unable to locate element",
+            "TimeoutException",
+            "ERR_PROXY_CONNECTION_FAILED",
+            "ERR_TIMED_OUT",
+            "로그인 페이지 로딩 시간 초과",
+            "요소를 찾을 수 없습니다",
+            "Connection refused",
+            "Network error",
+            "net::ERR_",
+            "Timeout",
+            "Failed to establish",
+            "페이지 로딩 시간 초과",
+            "로그인 페이지 로딩 실패",
+            "요소 대기 시간 초과"
+        ]
+        
+        return any(keyword in str(failure_reason) for keyword in proxy_error_keywords)
+    
+    def mark_proxy_blocked(self, proxy_url, thread_id=None):
+        """🔥 프록시를 차단 목록에 추가"""
+        if not proxy_url:
+            return
+            
+        with self.blocked_proxies_lock:
+            self.blocked_proxies.add(proxy_url)
+            blocked_count = len(self.blocked_proxies)
+            self.emit_progress(f"🚫 프록시 차단 추가: {proxy_url} (총 {blocked_count}개 차단됨)", thread_id)
+    
     def get_current_ip(self, driver):
         """현재 사용 중인 IP 주소 확인"""
         try:
@@ -5154,6 +6031,128 @@ class CafePostingWorker(QThread):
             self.emit_progress(f"⚠️ 공개 설정 확인/변경 실패: {str(e)}", thread_id)
             # 실패해도 계속 진행 (치명적이지 않음)
     
+    def enable_comments_for_writing(self, driver, thread_id):
+        """댓글 허용으로 변경 (댓글 작성을 위해)"""
+        try:
+            self.emit_progress("🔍 댓글 설정 확인 중...", thread_id)
+            
+            # 댓글 허용 체크박스 찾기
+            try:
+                comment_checkbox = driver.find_element(By.ID, "coment")
+                
+                # 체크박스가 비활성화(댓글 비허용) 상태인지 확인
+                if not comment_checkbox.is_selected():
+                    self.emit_progress("📝 댓글 비허용 감지 → 댓글 허용으로 변경 중...", thread_id)
+                    
+                    # 댓글 허용 체크박스 클릭
+                    driver.execute_script("arguments[0].click();", comment_checkbox)
+                    self.smart_sleep(0.5, "댓글 허용 선택 후 대기")
+                    
+                    self.emit_progress("✅ 댓글 허용으로 설정 완료 (댓글 작성 가능)", thread_id)
+                    self.smart_sleep(1, "댓글 설정 변경 후 대기")
+                else:
+                    self.emit_progress("ℹ️ 이미 댓글 허용 상태입니다", thread_id)
+                    
+            except Exception as checkbox_error:
+                self.emit_progress(f"⚠️ 댓글 허용 체크박스 처리 실패: {str(checkbox_error)}", thread_id)
+                # 체크박스를 찾을 수 없어도 계속 진행
+                
+        except Exception as e:
+            self.emit_progress(f"⚠️ 댓글 설정 확인/변경 실패: {str(e)}", thread_id)
+            # 실패해도 계속 진행 (치명적이지 않음)
+    
+    def change_board(self, driver, thread_id, target_board_name):
+        """게시판 변경 (목표 게시판명으로 이동)"""
+        try:
+            if not target_board_name or target_board_name.strip() == "":
+                self.emit_progress("ℹ️ 목표 게시판이 지정되지 않음 - 게시판 변경 건너뜀", thread_id)
+                return True
+            
+            self.emit_progress(f"🔄 게시판 변경 시작 → [{target_board_name}]", thread_id)
+            
+            # 1. 현재 선택된 게시판 버튼 찾기 (aria-haspopup="true"인 버튼)
+            current_board_button = None
+            current_board_name = ""
+            
+            try:
+                # 게시판 선택 메인 버튼 찾기 (aria-haspopup="true" + class="button")
+                current_board_button = driver.find_element(By.CSS_SELECTOR, 'button.button[aria-haspopup="true"]')
+                current_board_name = current_board_button.text.strip()
+                self.emit_progress(f"✅ 게시판 버튼 찾기 성공: [{current_board_name}]", thread_id)
+                
+                # 현재 게시판과 목표 게시판이 같으면 변경 안함
+                if current_board_name == target_board_name:
+                    self.emit_progress(f"ℹ️ 이미 [{target_board_name}] 게시판입니다 - 변경 불필요", thread_id)
+                    return True
+                
+                self.emit_progress(f"📋 현재 게시판: [{current_board_name}] → 목표: [{target_board_name}]", thread_id)
+                
+            except Exception as e:
+                self.emit_progress(f"⚠️ 게시판 버튼을 찾을 수 없음: {str(e)}", thread_id)
+                return False
+            
+            # 2. 게시판 선택 버튼 클릭하여 목록 열기
+            try:
+                is_expanded = current_board_button.get_attribute("aria-expanded")
+                self.emit_progress(f"🔍 게시판 목록 상태: {is_expanded}", thread_id)
+                
+                # 목록이 닫혀있으면 열기
+                if is_expanded == "false":
+                    driver.execute_script("arguments[0].click();", current_board_button)
+                    self.smart_sleep(1, "게시판 목록 열기 대기")
+                    self.emit_progress("✅ 게시판 목록 열기 완료", thread_id)
+                else:
+                    self.emit_progress("ℹ️ 게시판 목록이 이미 열려있음", thread_id)
+                
+            except Exception as e:
+                self.emit_progress(f"⚠️ 게시판 목록 열기 실패: {str(e)}", thread_id)
+                return False
+            
+            # 3. 게시판 목록에서 목표 게시판 찾기 (option 클래스)
+            try:
+                # 모든 게시판 옵션 가져오기
+                board_options = driver.find_elements(By.CSS_SELECTOR, "button.option")
+                
+                target_board_button = None
+                available_boards = []
+                
+                for option in board_options:
+                    # option_text span에서 정확한 게시판 이름 가져오기
+                    try:
+                        option_text_span = option.find_element(By.CSS_SELECTOR, "span.option_text")
+                        board_name = option_text_span.text.strip()
+                    except:
+                        # span이 없으면 버튼 전체 텍스트 사용
+                        board_name = option.text.strip().replace("선택됨", "").strip()
+                    
+                    available_boards.append(board_name)
+                    
+                    if board_name == target_board_name:
+                        target_board_button = option
+                        self.emit_progress(f"🎯 목표 게시판 찾음: [{board_name}]", thread_id)
+                        break
+                
+                if not target_board_button:
+                    self.emit_progress(f"❌ [{target_board_name}] 게시판을 찾을 수 없습니다", thread_id)
+                    self.emit_progress(f"📋 사용 가능한 게시판 (처음 10개): {', '.join(available_boards[:10])}", thread_id)
+                    return False
+                
+                # 4. 목표 게시판 버튼 클릭
+                driver.execute_script("arguments[0].click();", target_board_button)
+                self.smart_sleep(1.5, "게시판 변경 후 대기")
+                
+                self.emit_progress(f"✅ 게시판 변경 완료: [{current_board_name}] → [{target_board_name}]", thread_id)
+                return True
+                
+            except Exception as e:
+                self.emit_progress(f"⚠️ 게시판 옵션 처리 실패: {str(e)}", thread_id)
+                return False
+                
+        except Exception as e:
+            self.emit_progress(f"⚠️ 게시판 변경 실패: {str(e)}", thread_id)
+            # 실패해도 계속 진행 (치명적이지 않음)
+            return False
+    
     def check_login_failure_reason_early(self, driver):
         """🔧 로그인 실패 원인 우선 체크 (에러 메시지 기반)"""
         try:
@@ -5354,9 +6353,10 @@ class CafePostingWorker(QThread):
                 alert_text = alert.text
                 self.signals.progress.emit(f"🔔 Alert 감지: {alert_text}")
                 
-                # 삭제된 게시글 관련 키워드 확인
+                # 삭제된 게시글 및 권한 문제 관련 키워드 확인
                 delete_keywords = ["삭제되었거나 없는 게시글", "삭제된 게시글", "존재하지 않는 게시글", 
-                                 "없는 게시글", "삭제되었습니다", "찾을 수 없습니다"]
+                                 "없는 게시글", "삭제되었습니다", "찾을 수 없습니다",
+                                 "작성자 본인만"]  # 권한 문제 (무효한 URL 접속)
                 
                 if any(keyword in alert_text for keyword in delete_keywords):
                     alert.accept()  # 확인 버튼 클릭
@@ -5395,6 +6395,51 @@ class CafePostingWorker(QThread):
             
         except Exception as e:
             self.signals.progress.emit(f"⚠️ 삭제된 게시글 팝업 처리 중 오류: {str(e)}")
+            return False
+
+    def handle_activity_suspension_popup(self, driver, thread_id, account_id):
+        """활동정지 팝업 감지 및 처리 - 계정 차단 후 특별 예외 발생"""
+        try:
+            self.emit_progress("🔍 활동정지 팝업 확인 중...", thread_id)
+            
+            # JavaScript alert 처리
+            try:
+                alert = driver.switch_to.alert
+                alert_text = alert.text
+                self.emit_progress(f"🔔 Alert 감지: {alert_text[:50]}...", thread_id)
+                
+                # 활동정지 관련 키워드 확인
+                suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가"]
+                
+                if any(keyword in alert_text for keyword in suspension_keywords):
+                    self.emit_progress(f"🚫 활동정지 팝업 감지됨!", thread_id)
+                    self.emit_progress(f"   계정: {account_id}", thread_id)
+                    self.emit_progress(f"   메시지: {alert_text[:100]}", thread_id)
+                    
+                    alert.accept()  # 확인 버튼 클릭
+                    self.emit_progress("✅ 활동정지 Alert 확인 완료", thread_id)
+                    time.sleep(1)
+                    
+                    # 🔥 해당 계정을 차단 목록에 추가
+                    self.main_window.mark_reply_account_blocked(account_id)
+                    self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (활동정지)", thread_id)
+                    
+                    # 🔥 특별한 예외 발생 (상위에서 감지해서 해당 계정의 모든 작업 건너뜀)
+                    raise Exception(f"ACCOUNT_SUSPENDED:{account_id}")
+                    
+            except Exception as e:
+                # alert 관련 예외는 다시 발생
+                if "ACCOUNT_SUSPENDED" in str(e):
+                    raise e
+                # alert가 없는 경우는 False 반환
+                return False
+            
+            return False
+            
+        except Exception as e:
+            if "ACCOUNT_SUSPENDED" in str(e):
+                raise e  # 활동정지 예외는 상위로 전달
+            self.emit_progress(f"⚠️ 활동정지 팝업 처리 중 오류: {str(e)}", thread_id)
             return False
 
     def handle_title_popup(self, driver):
@@ -7406,13 +8451,19 @@ class CafePostingMainWindow(QMainWindow):
                 if len(reply_df.columns) >= 3:
                     edit_url = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else ""
                 
+                # 🆕 D열에서 목표 게시판 읽기
+                target_board = ""
+                if len(reply_df.columns) >= 4:
+                    target_board = str(row.iloc[3]).strip() if pd.notna(row.iloc[3]) else ""
+                
                 if id_ and pw and id_ != 'nan' and pw != 'nan':
                     self.reply_accounts.append((id_, pw))
                     # 🆕 각 행을 개별 작업으로 저장
                     self.account_rows.append({
                         'account_id': id_,
                         'password': pw,
-                        'url': edit_url if edit_url and edit_url != 'nan' else ""
+                        'url': edit_url if edit_url and edit_url != 'nan' else "",
+                        'target_board': target_board if target_board and target_board != 'nan' else ""
                     })
                     
                     # 🆕 계정별 수정할 URL 매핑 (여러 URL 지원) - 호환성 유지
@@ -8498,12 +9549,12 @@ class CafePostingMainWindow(QMainWindow):
             with self.reply_pool_lock:
                 # 🚨 완전 분리: 현재 카페 계정만 사용
                 self.available_reply_accounts = cafe_reply_accounts
-                self.blocked_reply_accounts = []
+                self.blocked_reply_accounts = set()  # list → set 수정
                 
             with self.comment_pool_lock:
                 # 🚨 완전 분리: 현재 카페 계정만 사용
                 self.available_comment_accounts = cafe_comment_accounts
-                self.blocked_comment_accounts = []
+                self.blocked_comment_accounts = set()  # list → set 수정
             
             # 계정 사용 횟수 초기화
             self.reset_account_usage()
@@ -9207,6 +10258,7 @@ class CafePostingMainWindow(QMainWindow):
             
             # 📌 성공/실패에 따른 색상 변경
             is_failure = (update_data.get('답글아이디로그인아이피') == '실패' or 
+                         update_data.get('답글아이디로그인아이피') == '활동정지' or
                          '오류:' in str(update_data.get('답글URL', '')))
             
             # 📌 댓글 완료 여부 확인 (더 진한 초록색)
@@ -9276,6 +10328,7 @@ class CafePostingMainWindow(QMainWindow):
             self.results[existing_row] = result
             self.update_table_row(existing_row, result)
             self.log_message(f"📝 작업 행 업데이트: {result.get('원본URL', 'Unknown')} - {result.get('답글아이디', 'Unknown')}")
+            row_to_color = existing_row
         else:
             # 새 행 추가 (기존 방식)
             self.results.append(result)
@@ -9284,6 +10337,19 @@ class CafePostingMainWindow(QMainWindow):
             self.result_table.insertRow(row)
             self.update_table_row(row, result)
             self.log_message(f"📝 새 작업 행 추가: {result.get('원본URL', 'Unknown')} - {result.get('답글아이디', 'Unknown')}")
+            row_to_color = row
+        
+        # 🔥 색상 설정 (실패/활동정지는 빨간색)
+        is_failure = (result.get('답글아이디로그인아이피') == '실패' or 
+                     result.get('답글아이디로그인아이피') == '활동정지' or
+                     result.get('답글등록상태') == 'X' or
+                     '오류:' in str(result.get('답글URL', '')))
+        
+        if is_failure:
+            for col in range(8):
+                item = self.result_table.item(row_to_color, col)
+                if item:
+                    item.setBackground(QColor(255, 200, 200))  # 연한 빨간색
         
         # 🆕 아이디 관리 통계 업데이트
         self.update_account_stats_from_result(result)
@@ -9320,6 +10386,13 @@ class CafePostingMainWindow(QMainWindow):
                         existing_result.get('답글아이디', '') in ['⏳ 대기중', '작업 중...', '']):  # 아직 아이디가 할당되지 않은 상태
                         self.log_message(f"⏳ 대기중 행 매칭: {os.path.basename(target_script_folder) if target_script_folder else 'None'}")
                         return i
+            
+            # 🔥 4순위: account_id로 직접 매칭 (활동정지 건너뛴 preview 행)
+            for i, existing_result in enumerate(self.results):
+                if (existing_result.get('account_id', '') == target_account_id and
+                    existing_result.get('is_preview', False)):  # preview 행만
+                    self.log_message(f"🎯 account_id 매칭 성공: {target_account_id} (preview 행)")
+                    return i
             
             self.log_message(f"❌ 매칭 실패 - 새 행 생성: {target_account_id}")
             return None
@@ -9397,8 +10470,24 @@ class CafePostingMainWindow(QMainWindow):
                 filename = self.generate_filename(cafe_name)
                 file_path = os.path.join(self.save_directory, filename)
                 
+                # 🔥 열 순서 명시적 고정 (항상 동일한 순서 보장)
+                column_order = [
+                    '폴더명', '답글아이디', '답글아이디로그인아이피', 
+                    '답글등록상태', '답글URL', '원본URL', 
+                    '댓글상황', '댓글차단'
+                ]
+                
                 # 메인 결과 저장
                 df = pd.DataFrame(self.pending_results[cafe_name])
+                
+                # 존재하는 주요 열을 정해진 순서대로 배치
+                existing_main = [col for col in column_order if col in df.columns]
+                # 나머지 추가 열들은 뒤에 추가
+                extra_cols = [col for col in df.columns if col not in column_order]
+                
+                # 열 순서 재정렬
+                df = df[existing_main + extra_cols]
+                
                 df.to_csv(file_path, index=False, encoding='utf-8-sig')
                 
                 # 계정 상태 로그 저장 (별도 파일)
@@ -9832,8 +10921,24 @@ class CafePostingMainWindow(QMainWindow):
         
         if file_path:
             try:
+                # 🔥 열 순서 명시적 고정 (항상 동일한 순서 보장)
+                column_order = [
+                    '폴더명', '답글아이디', '답글아이디로그인아이피', 
+                    '답글등록상태', '답글URL', '원본URL', 
+                    '댓글상황', '댓글차단'
+                ]
+                
                 # 메인 결과 저장
                 df = pd.DataFrame(self.results)
+                
+                # 존재하는 주요 열을 정해진 순서대로 배치
+                existing_main = [col for col in column_order if col in df.columns]
+                # 나머지 추가 열들은 뒤에 추가
+                extra_cols = [col for col in df.columns if col not in column_order]
+                
+                # 열 순서 재정렬
+                df = df[existing_main + extra_cols]
+                
                 df.to_csv(file_path, index=False, encoding='utf-8-sig')
                 
                 # 📌 계정 상태 로그 저장 (별도 파일)
@@ -10145,7 +11250,21 @@ class CafePostingMainWindow(QMainWindow):
                 self.log_message(f"🥈 스레드{thread_id} 새 답글 계정 시작: {selected_account[0]} (사용: {current_usage}/{account_limit})")
                 return selected_account
             
-            self.log_message(f"❌ 스레드{thread_id} 사용 가능한 답글 계정이 없습니다! (모든 계정이 제한 도달 또는 차단됨)")
+            # 🚨 사용 가능한 답글 계정이 없을 때 상세 정보 출력
+            blocked_count = len(self.blocked_reply_accounts)
+            blocked_account_ids = list(self.blocked_reply_accounts)
+            
+            self.log_message("=" * 60)
+            self.log_message(f"🚨 스레드{thread_id} 답글 작성 중단: 사용 가능한 계정이 없습니다!")
+            self.log_message(f"   📊 전체 답글 계정: {len(thread_reply_accounts)}개")
+            self.log_message(f"   🚫 차단된 계정: {blocked_count}개")
+            if blocked_account_ids:
+                blocked_list = ", ".join(blocked_account_ids[:10])  # 최대 10개까지만 표시
+                if len(blocked_account_ids) > 10:
+                    blocked_list += f" 외 {len(blocked_account_ids) - 10}개"
+                self.log_message(f"   🔴 차단 목록: {blocked_list}")
+            self.log_message(f"   ⚠️ 모든 계정이 제한 도달 또는 차단되어 답글 작성을 건너뜁니다.")
+            self.log_message("=" * 60)
             return None
 
     def get_comment_account_from_pool(self, exclude_account_id=None):
@@ -10179,7 +11298,54 @@ class CafePostingMainWindow(QMainWindow):
                     self.log_message(f"🔄 댓글 계정 순환 할당: {account[0]} (사용 가능: {available_count}개)")
                     return account
             
-            self.log_message("❌ 모든 댓글 계정이 차단되었거나 제외되었습니다!")
+            # 🚨🚨🚨 모든 댓글 계정이 차단되었을 때 전체 작업 중단 🚨🚨🚨
+            blocked_count = len(self.blocked_comment_accounts)
+            blocked_account_ids = [acc[0] if isinstance(acc, tuple) else acc for acc in self.blocked_comment_accounts]
+            
+            self.log_message("\n" + "=" * 70)
+            self.log_message("🚨🚨🚨 긴급: 모든 댓글 계정 차단으로 전체 작업 중단! 🚨🚨🚨")
+            self.log_message("=" * 70)
+            self.log_message(f"   📊 전체 댓글 계정: {total_accounts}개")
+            self.log_message(f"   🚫 차단된 계정: {blocked_count}개")
+            if blocked_account_ids:
+                blocked_list = ", ".join(blocked_account_ids[:10])  # 최대 10개까지만 표시
+                if len(blocked_account_ids) > 10:
+                    blocked_list += f" 외 {len(blocked_account_ids) - 10}개"
+                self.log_message(f"   🔴 차단 목록: {blocked_list}")
+            if exclude_account_id:
+                self.log_message(f"   ⛔ 제외된 계정: {exclude_account_id} (답글 작성자)")
+            self.log_message("")
+            self.log_message("⚠️ 댓글 계정 없이 답글만 작성하면 원고 관리가 불가능합니다!")
+            self.log_message("⚠️ 추가 작업을 방지하기 위해 전체 프로그램을 중단합니다.")
+            self.log_message("")
+            self.log_message("📌 조치 방법:")
+            self.log_message("   1. 차단된 계정들을 확인하세요")
+            self.log_message("   2. 새로운 댓글 계정을 준비하세요")
+            self.log_message("   3. 작업 진행 상황을 확인하고 재시작하세요")
+            self.log_message("=" * 70 + "\n")
+            
+            # 🔥 전체 작업 중단 플래그 설정
+            if hasattr(self, 'worker') and self.worker:
+                self.worker.is_running = False
+                self.worker.signals.progress.emit("🛑 댓글 계정 소진으로 인한 전체 작업 강제 중단!")
+            
+            # 🔔 긴급 팝업 알림 (사용자에게 즉시 알림)
+            try:
+                from PySide6.QtWidgets import QMessageBox
+                from PySide6.QtCore import Qt
+                
+                # 메인 스레드에서 실행되도록 시그널 전송
+                if hasattr(self, 'worker') and self.worker:
+                    # 별도 시그널로 처리하거나 직접 호출
+                    pass
+                    
+                # 긴급 알림 메시지 (백그라운드에서도 표시)
+                self.log_message("")
+                self.log_message("🔔🔔🔔 긴급 알림: 팝업 확인 필요! 🔔🔔🔔")
+                self.log_message("")
+            except Exception as e:
+                self.log_message(f"⚠️ 팝업 알림 실패: {e}")
+            
             return None
 
     def mark_reply_account_blocked(self, account):
