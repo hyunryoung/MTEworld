@@ -4146,22 +4146,35 @@ class CafePostingWorker(QThread):
         
         written_comments = []  # 작성된 댓글들을 추적
         
+        reply_deleted = False  # 🔥 삭제된 답글 플래그
+        
         for i, comment in enumerate(parser.comments):
             if not self.is_running:
                 break
             
-            # 🔄 댓글별 다중 계정 재시도 시스템
-            success = self.process_single_comment(thread_id, reply_url, comment, reply_account, i, len(parser.comments), written_comments)
-            
-            if success:
-                written_comments.append(comment)
-                # 🔥 로그 스팸 최적화: 댓글 완료 로그도 5개마다만 (답글방식에서 가져온 최적화)
-                if i % 5 == 0 or i == len(parser.comments) - 1:
-                    self.emit_progress(f"✅ 댓글 {i+1}/{len(parser.comments)} 작성 완료", thread_id)
-            else:
-                # 🔥 로그 스팸 최적화: 실패 로그도 5개마다만 (답글방식에서 가져온 최적화)
-                if i % 5 == 0 or i == len(parser.comments) - 1:
-                    self.emit_progress(f"❌ 댓글 {i+1}/{len(parser.comments)} 모든 계정 시도 실패 - 건너뜀", thread_id)
+            try:
+                # 🔄 댓글별 다중 계정 재시도 시스템
+                success = self.process_single_comment(thread_id, reply_url, comment, reply_account, i, len(parser.comments), written_comments)
+                
+                if success:
+                    written_comments.append(comment)
+                    # 🔥 로그 스팸 최적화: 댓글 완료 로그도 5개마다만 (답글방식에서 가져온 최적화)
+                    if i % 5 == 0 or i == len(parser.comments) - 1:
+                        self.emit_progress(f"✅ 댓글 {i+1}/{len(parser.comments)} 작성 완료", thread_id)
+                else:
+                    # 🔥 로그 스팸 최적화: 실패 로그도 5개마다만 (답글방식에서 가져온 최적화)
+                    if i % 5 == 0 or i == len(parser.comments) - 1:
+                        self.emit_progress(f"❌ 댓글 {i+1}/{len(parser.comments)} 모든 계정 시도 실패 - 건너뜀", thread_id)
+                
+            except Exception as e:
+                # 🔥 REPLY_DELETED 예외 처리 - 전체 댓글 작업 중단
+                if "REPLY_DELETED" in str(e):
+                    self.emit_progress(f"🗑️ 답글이 삭제되어 남은 모든 댓글 작업을 건너뜁니다", thread_id)
+                    reply_deleted = True
+                    break
+                else:
+                    # 다른 예외는 로그만 출력하고 계속
+                    self.emit_progress(f"⚠️ 댓글 {i+1} 처리 중 예외: {str(e)}", thread_id)
             
             # 댓글 간 대기 (단축된 대기 시간)
             if i < len(parser.comments) - 1:
@@ -4331,16 +4344,20 @@ class CafePostingWorker(QThread):
                 self.smart_sleep(10, "댓글 페이지 로딩 후 대기")
                 
                 # 삭제된 게시글 팝업 확인
-                if self.handle_deleted_post_popup(driver):
+                if self.handle_deleted_post_popup(driver, thread_id):
                     self.emit_progress(f"❌ 답글이 삭제되어 댓글 작성 불가: {reply_url}", thread_id)
+                    self.emit_progress(f"🗑️ 삭제된 게시글 - 모든 댓글 작업 중단 및 다음 원고로 진행", thread_id)
                     # 결과 테이블 업데이트
                     if hasattr(self, 'current_row'):
-                        update_data = {'댓글상황': '답글 삭제됨'}
+                        update_data = {'댓글상황': '🗑️ 답글 삭제됨 (전체 스킵)'}
                         self.main_window.update_result(self.current_row, update_data)
-                    # 로그아웃 후 종료
-                    self.logout(driver)
-                    driver.quit()
-                    return False
+                    # 브라우저 정리 후 종료
+                    try:
+                        driver.quit()
+                    except:
+                        pass
+                    # 🔥 특별한 예외 발생 - 재시도 없이 전체 댓글 작업 중단
+                    raise Exception(f"REPLY_DELETED:{reply_url}")
                 
                 # 기존 댓글들이 모두 로딩될 때까지 대기
                 self.wait_for_existing_comments_to_load(driver)
@@ -4537,9 +4554,15 @@ class CafePostingWorker(QThread):
                 return True  # 성공
             
             except Exception as e:
+                error_message = str(e)
+                
+                # 🔥 REPLY_DELETED 예외는 상위로 전달 (재시도 없이 전체 댓글 작업 중단)
+                if "REPLY_DELETED" in error_message:
+                    raise e
+                
                 # 🔧 account 변수가 할당되었는지 확인
                 account_info = account[0] if 'account' in locals() and account else "알 수 없음"
-                self.emit_progress(f"❌ [스레드{thread_id+1}] 댓글 {comment_index+1} 계정 {account_info} 시도 실패: {str(e)}", thread_id)
+                self.emit_progress(f"❌ [스레드{thread_id+1}] 댓글 {comment_index+1} 계정 {account_info} 시도 실패: {error_message}", thread_id)
                 
                 # 실패 시 개별 드라이버만 정리
                 try:
@@ -5642,7 +5665,12 @@ class CafePostingWorker(QThread):
             
             self.smart_sleep(10, "로그인 처리 대기")
 
-            # 아이디 보호 메시지 확인
+            # 🔥 보호조치 감지 (2가지 케이스)
+            protection_detected, protection_reason = self.check_account_protection(driver, login_id, thread_id)
+            if protection_detected:
+                return False, protection_reason
+
+            # 아이디 보호 메시지 확인 (기존 로직 - 백업용)
             try:
                 warning_element = driver.find_element(By.CSS_SELECTOR, ".warning_title")
                 if warning_element and "아이디를 보호하고 있습니다" in warning_element.text:
@@ -6396,6 +6424,63 @@ class CafePostingWorker(QThread):
                 
         except Exception as e:
             return f"실패 원인 분석 중 오류: {str(e)}"
+    
+    def check_account_protection(self, driver, login_id, thread_id=None):
+        """🔥 계정 보호조치 감지 (2가지 케이스)
+        
+        케이스 1: 비정상적인 활동 감지 → 보호(잠금) 조치
+        - URL: nid.naver.com/nidlogin.login
+        - 텍스트: "비정상적인 활동이 감지되어", "보호(잠금) 조치중"
+        
+        케이스 2: 아이디 보호 중
+        - URL: nid.naver.com/user2/help/idSafetyRelease
+        - 텍스트: "아이디를 보호하고 있습니다", "보호조치 해제"
+        
+        Returns:
+            (bool, str): (감지 여부, 실패 사유)
+        """
+        try:
+            current_url = driver.current_url
+            page_source = driver.page_source
+            
+            # 🔥 케이스 1: 비정상적인 활동 감지 → 보호(잠금) 조치
+            protection_case1_keywords = [
+                "비정상적인 활동이 감지되어",
+                "보호(잠금) 조치중",
+                "아이디를 보호(잠금) 조치중입니다",
+                "스팸성 홍보활동"
+            ]
+            
+            for keyword in protection_case1_keywords:
+                if keyword in page_source:
+                    self.emit_progress(f"🛡️ 계정 {login_id}: 보호조치 감지 (비정상 활동)", thread_id)
+                    self.emit_progress(f"   → 스팸성 홍보활동으로 인한 보호(잠금) 조치", thread_id)
+                    return True, "보호조치 (비정상 활동 감지)"
+            
+            # 🔥 케이스 2: 아이디 보호 중 (idSafetyRelease 페이지)
+            if "idSafetyRelease" in current_url:
+                self.emit_progress(f"🛡️ 계정 {login_id}: 보호조치 감지 (아이디 보호 중)", thread_id)
+                self.emit_progress(f"   → 아이디 보호 페이지로 리다이렉트됨", thread_id)
+                return True, "보호조치 (아이디 보호 중)"
+            
+            protection_case2_keywords = [
+                "회원님의 아이디를 보호하고 있습니다",
+                "보호조치 해제",
+                "아이디는 언제 보호되나요"
+            ]
+            
+            for keyword in protection_case2_keywords:
+                if keyword in page_source:
+                    self.emit_progress(f"🛡️ 계정 {login_id}: 보호조치 감지 (아이디 보호 중)", thread_id)
+                    self.emit_progress(f"   → 보호조치 해제 필요", thread_id)
+                    return True, "보호조치 (아이디 보호 중)"
+            
+            # 보호조치 없음
+            return False, None
+            
+        except Exception as e:
+            # 체크 실패해도 계속 진행 (False 반환)
+            return False, None
     
     def has_captcha(self, driver):
         """현재 페이지에 캡차가 있는지 확인"""
