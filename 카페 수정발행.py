@@ -7,9 +7,18 @@
 - 라이선스 인증 시스템
 - 자동 업데이트 기능
 
-Version: 0.3.7
+Version: 0.3.8
 Author: MTEworld
-Last Updated: 2026-01-29
+Last Updated: 2026-01-30
+
+[v0.3.8 업데이트 내역]
+- 🔥 삭제된 게시글/카페 활동정지 → URL 단위 스킵으로 변경
+  - 기존: 해당 계정의 모든 URL 전체 스킵 + 드라이버 종료
+  - 개선: 해당 URL만 스킵하고 다음 URL 진행 + 세션 유지
+- 🔥 같은 계정의 다른 카페 URL은 정상 작업 가능
+- 🔥 로그인 세션 유지로 불필요한 재로그인 방지
+- 계정 차단 목록 추가 로직 제거 (계정은 정상, 게시글/카페만 문제)
+- 작업 효율성 대폭 향상 (로그인 횟수 감소)
 
 [v0.3.7 업데이트 내역]
 - 🔥 원고 폴더 자동 이동 기능 추가
@@ -98,8 +107,8 @@ Last Updated: 2026-01-29
 """
 
 # 🔢 버전 정보
-__version__ = "0.3.7"
-__build_date__ = "2026-01-29"
+__version__ = "0.3.8"
+__build_date__ = "2026-01-30"
 __author__ = "MTEworld"
 
 # 🔄 업데이트 관련 설정
@@ -1893,97 +1902,15 @@ class CafePostingWorker(QThread):
                 except Exception as e:
                     error_message = str(e)
                     
-                    # 🔥 활동정지 예외 처리 - 해당 계정의 모든 원고 건너뛰기
+                    # 🔥 v0.3.8: URL 단위 스킵으로 변경 - 계정 전체 스킵 로직 제거
+                    # 활동정지/삭제된 게시글 발생 시 해당 URL만 스킵하고 다음 URL 진행
                     if "ACCOUNT_SUSPENDED" in error_message:
                         suspended_account = error_message.split(":")[-1]
-                        self.emit_progress(f"", thread_id)
-                        self.emit_progress(f"🚫 활동정지 계정: {suspended_account} - 해당 계정의 남은 모든 원고를 건너뜁니다", thread_id)
-                        
-                        # 🔥 해당 계정으로 매핑된 나머지 원고들을 모두 실패 처리
-                        remaining_tasks = task_list[task_idx+1:]  # 현재 작업 이후의 모든 작업
-                        for remaining_task in remaining_tasks:
-                            if len(remaining_task) == 4:  # ID 기준 task
-                                remaining_account_id, remaining_script_index, remaining_script_folder, remaining_assigned_url = remaining_task
-                                
-                                # row 번호 제거 후 비교 (gxstomach_row1 → gxstomach)
-                                remaining_real_account = remaining_account_id.split('_row')[0] if '_row' in remaining_account_id else remaining_account_id
-                                suspended_real_account = suspended_account.split('_row')[0] if '_row' in suspended_account else suspended_account
-                                
-                                # 동일한 계정인 경우 실패 처리
-                                if remaining_real_account == suspended_real_account:
-                                    cafe_name = getattr(self, 'current_cafe_name', '')
-                                    
-                                    result = {
-                                        '답글아이디': remaining_account_id,
-                                        '답글아이디로그인아이피': '활동정지',
-                                        '답글등록상태': 'X',  # 실패로 표시 (빨간색)
-                                        '폴더명': extract_keyword_from_folder_name(os.path.basename(remaining_script_folder)),
-                                        '답글URL': '🚫 활동정지 (건너뜀)',
-                                        '원본URL': remaining_assigned_url,
-                                        '댓글상황': '작업 안함 (활동정지)',
-                                        '댓글차단': '❌ 활동정지',
-                                        'cafe_name': cafe_name,
-                                        'script_folder': remaining_script_folder,
-                                        'account_id': remaining_account_id,
-                                        'unique_key': generate_unique_key(remaining_assigned_url, remaining_script_folder, thread_id),
-                                        'is_preview': False  # 🔥 실제 결과로 표시
-                                    }
-                                    self.signals.result_saved.emit(result)
-                                    self.save_result_immediately(result)
-                                    
-                                    # 작업 완료로 표시 (재시도 방지)
-                                    unique_task_key = f"{remaining_account_id}_{remaining_script_folder}_{remaining_assigned_url}"
-                                    temp_url_index = hash(unique_task_key) % 10000000
-                                    self.progress.mark_task_completed(temp_url_index, remaining_script_index)
-                        
-                        self.emit_progress(f"✅ {suspended_account} 계정의 모든 원고 실패 처리 완료 - 다음 계정으로 진행", thread_id)
-                        self.emit_progress(f"", thread_id)
+                        self.emit_progress(f"🚫 카페 활동정지: {suspended_account} - 해당 URL 스킵, 다음 URL 진행", thread_id)
                     
-                    # 🔥 삭제된 게시글 예외 처리 - 해당 계정의 모든 원고 건너뛰기
                     elif "POST_DELETED" in error_message:
                         deleted_account = error_message.split(":")[-1]
-                        self.emit_progress(f"", thread_id)
-                        self.emit_progress(f"🗑️ 삭제된 게시글 감지: {deleted_account} - 해당 계정의 남은 모든 원고를 건너뜁니다", thread_id)
-                        
-                        # 🔥 해당 계정으로 매핑된 나머지 원고들을 모두 실패 처리
-                        remaining_tasks = task_list[task_idx+1:]  # 현재 작업 이후의 모든 작업
-                        for remaining_task in remaining_tasks:
-                            if len(remaining_task) == 4:  # ID 기준 task
-                                remaining_account_id, remaining_script_index, remaining_script_folder, remaining_assigned_url = remaining_task
-                                
-                                # row 번호 제거 후 비교
-                                remaining_real_account = remaining_account_id.split('_row')[0] if '_row' in remaining_account_id else remaining_account_id
-                                deleted_real_account = deleted_account.split('_row')[0] if '_row' in deleted_account else deleted_account
-                                
-                                # 동일한 계정인 경우 실패 처리
-                                if remaining_real_account == deleted_real_account:
-                                    cafe_name = getattr(self, 'current_cafe_name', '')
-                                    
-                                    result = {
-                                        '답글아이디': remaining_account_id,
-                                        '답글아이디로그인아이피': '삭제된 게시글',
-                                        '답글등록상태': 'X',  # 실패로 표시 (빨간색)
-                                        '폴더명': extract_keyword_from_folder_name(os.path.basename(remaining_script_folder)),
-                                        '답글URL': '🗑️ 삭제된 게시글 (건너뜀)',
-                                        '원본URL': remaining_assigned_url,
-                                        '댓글상황': '작업 안함 (삭제된 게시글)',
-                                        '댓글차단': '❌ 삭제된 게시글',
-                                        'cafe_name': cafe_name,
-                                        'script_folder': remaining_script_folder,
-                                        'account_id': remaining_account_id,
-                                        'unique_key': generate_unique_key(remaining_assigned_url, remaining_script_folder, thread_id),
-                                        'is_preview': False  # 🔥 실제 결과로 표시
-                                    }
-                                    self.signals.result_saved.emit(result)
-                                    self.save_result_immediately(result)
-                                    
-                                    # 작업 완료로 표시 (재시도 방지)
-                                    unique_task_key = f"{remaining_account_id}_{remaining_script_folder}_{remaining_assigned_url}"
-                                    temp_url_index = hash(unique_task_key) % 10000000
-                                    self.progress.mark_task_completed(temp_url_index, remaining_script_index)
-                        
-                        self.emit_progress(f"✅ {deleted_account} 계정의 모든 원고 실패 처리 완료 - 다음 계정으로 진행", thread_id)
-                        self.emit_progress(f"", thread_id)
+                        self.emit_progress(f"🗑️ 삭제된 게시글: {deleted_account} - 해당 URL 스킵, 다음 URL 진행", thread_id)
                     
                     else:
                         # 일반 오류는 로그만 출력하고 다음 작업 계속
@@ -2298,12 +2225,12 @@ class CafePostingWorker(QThread):
         except Exception as e:
             error_message = str(e)
             
-            # 🔥 활동정지 예외 처리
+            # 🔥 활동정지 예외 처리 (v0.3.8: URL 단위 스킵으로 변경)
             if "ACCOUNT_SUSPENDED" in error_message:
                 suspended_account = error_message.split(":")[-1]
                 self.emit_progress(f"", thread_id)
-                self.emit_progress(f"🚫🚫🚫 활동정지 계정 감지: {suspended_account}", thread_id)
-                self.emit_progress(f"   ⚠️ 해당 계정으로 매핑된 모든 원고를 실패 처리하고 건너뜁니다", thread_id)
+                self.emit_progress(f"🚫 카페 활동정지 감지: {suspended_account}", thread_id)
+                self.emit_progress(f"   ➡️ 해당 URL만 스킵하고 다음 URL로 진행합니다", thread_id)
                 self.emit_progress(f"", thread_id)
                 
                 # 활동정지 결과 저장
@@ -2327,19 +2254,15 @@ class CafePostingWorker(QThread):
                 # 🔥 활동정지 시 원고 폴더 이동
                 self.move_script_folder(script_folder, 'suspended', thread_id)
                 
-                # 드라이버 정리
-                self.emit_progress(f"🧹 [스레드{thread_id+1}] 활동정지 계정 - 전체 드라이버 정리", thread_id)
-                self.safe_cleanup_thread_drivers(thread_id)
-                
-                # 🔥 ACCOUNT_SUSPENDED 예외를 상위로 전달하여 해당 계정의 모든 작업 건너뛰기
-                raise Exception(f"ACCOUNT_SUSPENDED:{suspended_account}")
+                # 🔥 v0.3.8: 드라이버 유지 (세션 유지) - 다음 URL 작업을 위해 드라이버 정리하지 않음
+                # 예외를 발생시키지 않고 정상 종료하여 다음 URL로 진행
             
-            # 🔥 삭제된 게시글 예외 처리
+            # 🔥 삭제된 게시글 예외 처리 (v0.3.8: URL 단위 스킵으로 변경)
             elif "POST_DELETED" in error_message:
                 deleted_account = error_message.split(":")[-1]
                 self.emit_progress(f"", thread_id)
-                self.emit_progress(f"🗑️🗑️🗑️ 삭제된 게시글 감지: {deleted_account}", thread_id)
-                self.emit_progress(f"   ⚠️ 해당 계정으로 매핑된 모든 원고를 실패 처리하고 건너뜁니다", thread_id)
+                self.emit_progress(f"🗑️ 삭제된 게시글 감지: {deleted_account}", thread_id)
+                self.emit_progress(f"   ➡️ 해당 URL만 스킵하고 다음 URL로 진행합니다", thread_id)
                 self.emit_progress(f"", thread_id)
                 
                 # 삭제된 게시글 결과 저장
@@ -2363,12 +2286,8 @@ class CafePostingWorker(QThread):
                 # 🔥 삭제된 게시글 시 원고 폴더 이동
                 self.move_script_folder(script_folder, 'deleted', thread_id)
                 
-                # 드라이버 정리
-                self.emit_progress(f"🧹 [스레드{thread_id+1}] 삭제된 게시글 - 전체 드라이버 정리", thread_id)
-                self.safe_cleanup_thread_drivers(thread_id)
-                
-                # 🔥 POST_DELETED 예외를 상위로 전달하여 해당 계정의 모든 작업 건너뛰기
-                raise Exception(f"POST_DELETED:{deleted_account}")
+                # 🔥 v0.3.8: 드라이버 유지 (세션 유지) - 다음 URL 작업을 위해 드라이버 정리하지 않음
+                # 예외를 발생시키지 않고 정상 종료하여 다음 URL로 진행
             
             # 일반 오류 처리
             else:
@@ -6639,19 +6558,14 @@ class CafePostingWorker(QThread):
                     
                     time.sleep(1)
                     
-                    # 🔥 계정 ID가 있으면 차단 목록에 추가하고 예외 발생
+                    # 🔥 v0.3.8: URL 단위 스킵으로 변경 - 계정 차단하지 않고 예외만 발생
                     if account_id:
                         if thread_id is not None:
-                            self.emit_progress(f"🚫 삭제된 게시글 감지! 계정: {account_id}", thread_id)
-                            self.emit_progress(f"   메시지: {alert_text[:100]}", thread_id)
+                            self.emit_progress(f"🗑️ 삭제된 게시글 감지! 계정: {account_id}", thread_id)
+                            self.emit_progress(f"   ➡️ 해당 URL만 스킵, 다음 URL 진행", thread_id)
                         
-                        # 해당 계정을 차단 목록에 추가
-                        self.main_window.mark_reply_account_blocked(account_id)
-                        
-                        if thread_id is not None:
-                            self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (삭제된 게시글)", thread_id)
-                        
-                        # 🔥 특별한 예외 발생 (상위에서 감지해서 해당 계정의 모든 작업 건너뜀)
+                        # 🔥 v0.3.8: 계정 차단하지 않음 (계정은 정상, 게시글만 삭제됨)
+                        # POST_DELETED 예외 발생하여 상위에서 해당 URL만 스킵 처리
                         raise Exception(f"POST_DELETED:{account_id}")
                     
                     return True
@@ -6682,15 +6596,14 @@ class CafePostingWorker(QThread):
                             error_text = element.text
                             if any(keyword in error_text for keyword in ["삭제", "없는", "존재하지"]):
                                 if thread_id is not None:
-                                    self.emit_progress(f"✅ 삭제된 게시글 메시지 감지: {error_text}", thread_id)
+                                    self.emit_progress(f"🗑️ 삭제된 게시글 메시지 감지: {error_text}", thread_id)
                                 else:
-                                    self.signals.progress.emit(f"✅ 삭제된 게시글 메시지 감지: {error_text}")
+                                    self.signals.progress.emit(f"🗑️ 삭제된 게시글 메시지 감지: {error_text}")
                                 
-                                # 🔥 계정 ID가 있으면 차단 목록에 추가하고 예외 발생
+                                # 🔥 v0.3.8: URL 단위 스킵 - 계정 차단하지 않음
                                 if account_id:
-                                    self.main_window.mark_reply_account_blocked(account_id)
                                     if thread_id is not None:
-                                        self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (삭제된 게시글)", thread_id)
+                                        self.emit_progress(f"   ➡️ 해당 URL만 스킵, 다음 URL 진행", thread_id)
                                     raise Exception(f"POST_DELETED:{account_id}")
                                 
                                 return True
@@ -6727,19 +6640,16 @@ class CafePostingWorker(QThread):
                 suspension_keywords = ["활동정지", "활동 정지", "글쓰기와 수정", "카페 활동이 불가"]
                 
                 if any(keyword in alert_text for keyword in suspension_keywords):
-                    self.emit_progress(f"🚫 활동정지 팝업 감지됨!", thread_id)
+                    self.emit_progress(f"🚫 카페 활동정지 팝업 감지됨!", thread_id)
                     self.emit_progress(f"   계정: {account_id}", thread_id)
-                    self.emit_progress(f"   메시지: {alert_text[:100]}", thread_id)
+                    self.emit_progress(f"   ➡️ 해당 URL만 스킵, 다음 URL 진행", thread_id)
                     
                     alert.accept()  # 확인 버튼 클릭
                     self.emit_progress("✅ 활동정지 Alert 확인 완료", thread_id)
                     time.sleep(1)
                     
-                    # 🔥 해당 계정을 차단 목록에 추가
-                    self.main_window.mark_reply_account_blocked(account_id)
-                    self.emit_progress(f"🚫 {account_id} 계정 차단 목록 추가 (활동정지)", thread_id)
-                    
-                    # 🔥 특별한 예외 발생 (상위에서 감지해서 해당 계정의 모든 작업 건너뜀)
+                    # 🔥 v0.3.8: 계정 차단하지 않음 (해당 카페에서만 활동정지, 다른 카페는 정상)
+                    # ACCOUNT_SUSPENDED 예외 발생하여 상위에서 해당 URL만 스킵 처리
                     raise Exception(f"ACCOUNT_SUSPENDED:{account_id}")
                     
             except Exception as e:
